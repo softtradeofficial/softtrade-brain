@@ -33,6 +33,16 @@ export const config = {
     trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
     // Windows integrated auth is used when no user/password is supplied.
     trustedConnection: !process.env.DB_USER,
+    /**
+     * Databases the UI may switch between, comma separated. Empty means "every database on
+     * the server this login can read", narrowed by DB_NAME_PATTERN.
+     */
+    allowedDatabases: (process.env.ALLOWED_DATABASES ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    /** SQL LIKE pattern applied to the discovered list, e.g. stm_%. Empty = no filter. */
+    namePattern: process.env.DB_NAME_PATTERN?.trim() ?? '',
   },
 
   openai: {

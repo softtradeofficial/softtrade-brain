@@ -1,6 +1,6 @@
 import { AfterViewChecked, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
 import { ChatService } from '../../services/chat.service';
-import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
+import { ChatMessage, ChatTurn, DatabaseInfo, SchemaTable } from '../../models/chat.models';
 
 @Component({
   selector: 'app-chat',
@@ -17,6 +17,9 @@ export class ChatComponent implements OnInit, AfterViewChecked {
 
   database = '';
   model = '';
+  databases: DatabaseInfo[] = [];
+  schemaLoading = false;
+  switchNotice = '';
   tables: SchemaTable[] = [];
   showSchema = false;
   schemaFilter = '';
@@ -46,13 +49,45 @@ export class ChatComponent implements OnInit, AfterViewChecked {
       },
     });
 
-    this.chat.schema().subscribe({
+    this.chat.databases().subscribe({
+      next: (payload) => {
+        this.databases = payload.databases;
+        if (!this.database && payload.current) this.database = payload.current;
+        this.loadSchema();
+      },
+      error: () => {
+        // Without the list we can still work against whichever database the API defaults to.
+        this.loadSchema();
+      },
+    });
+  }
+
+  /** Switching client databases invalidates the conversation, so the chat starts fresh. */
+  onDatabaseChange(name: string): void {
+    if (!name || name === this.database) return;
+
+    this.database = name;
+    this.messages = [];
+    this.tables = [];
+    this.schemaFilter = '';
+    this.connectionError = '';
+    this.switchNotice = `Now querying ${name}.`;
+    this.loadSchema();
+  }
+
+  private loadSchema(): void {
+    this.schemaLoading = true;
+    this.chat.schema(this.database || undefined).subscribe({
       next: (payload) => {
         this.tables = payload.tables;
         this.database = payload.database;
+        this.schemaLoading = false;
       },
-      error: () => {
-        /* The health check already reports connection problems. */
+      error: (error) => {
+        this.schemaLoading = false;
+        const detail = error?.error?.error;
+        if (detail) this.connectionError = detail;
+        /* Otherwise the health check already reports connection problems. */
       },
     });
   }
@@ -91,6 +126,7 @@ export class ChatComponent implements OnInit, AfterViewChecked {
     if (!question || this.loading) return;
 
     this.connectionError = '';
+    this.switchNotice = '';
     this.draft = '';
     this.loading = true;
     this.shouldScroll = true;
@@ -107,7 +143,7 @@ export class ChatComponent implements OnInit, AfterViewChecked {
     };
     this.messages.push(placeholder);
 
-    this.chat.ask(question, history).subscribe({
+    this.chat.ask(question, history, this.database || undefined).subscribe({
       next: (payload) => {
         Object.assign(placeholder, {
           pending: false,
@@ -147,6 +183,7 @@ export class ChatComponent implements OnInit, AfterViewChecked {
 
   clear(): void {
     this.messages = [];
+    this.switchNotice = '';
   }
 
   trackById(_index: number, message: ChatMessage): number {
@@ -162,6 +199,10 @@ export class ChatComponent implements OnInit, AfterViewChecked {
     return this.messages
       .filter((message) => !message.pending && !message.failed && message.text)
       .slice(-6)
-      .map((message) => ({ role: message.role, content: message.text }));
+      .map((message) => ({
+        role: message.role,
+        content: message.text,
+        ...(message.sql ? { sql: message.sql } : {}),
+      }));
   }
 }

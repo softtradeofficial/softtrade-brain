@@ -73,6 +73,33 @@
   white-space: nowrap;
 }
 
+.conn__select {
+  max-width: 160px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.conn__select:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.conn__select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.conn__select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .schema {
   flex: 1;
   min-height: 0;
@@ -216,6 +243,12 @@
   background: rgba(239, 92, 92, 0.12);
   border: 1px solid rgba(239, 92, 92, 0.35);
   color: #ffb4b4;
+}
+
+.banner--info {
+  background: rgba(63, 208, 160, 0.1);
+  border-color: rgba(63, 208, 160, 0.32);
+  color: var(--accent);
 }
 
 .scroll {

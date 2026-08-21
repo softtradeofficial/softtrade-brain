@@ -111,6 +111,43 @@ IMPORTANT: this database has NO foreign key constraints. Only join tables using 
 relationships listed above; do not invent joins from column names that merely look similar.
 `.trim();
 
+/**
+ * Tables the glossary above is written about. A database missing them is not a SoftTrade
+ * trading database - several servers also host small companion databases (Bandikui_Company,
+ * HariNarain_StMast) that hold only configuration. Telling the model up front beats letting
+ * it write a query against InvTranTbl and then apologise.
+ */
+const CORE_TABLES = ['InvTranTbl', 'Account'];
+
+/** How many table names the note may list before it costs more than it is worth. */
+const MAX_LISTED_TABLES = 150;
+
+export function unfamiliarDatabaseNote(database: string, tableNames: string[]): string {
+  const present = new Set(tableNames.map((name) => name.split('.').pop()!.toLowerCase()));
+  const missing = CORE_TABLES.filter((name) => !present.has(name.toLowerCase()));
+  if (!missing.length) return '';
+
+  const lines = [
+    'THIS DATABASE DOES NOT FOLLOW THE STANDARD SOFTTRADE LAYOUT:',
+    `[${database}] has no ${missing.join(' or ')} table, so the business vocabulary above does not`,
+    'apply here. Use only the tables listed in the schema below. If the question asks about bills,',
+    'sales, parties or stock and no table here holds that data, reply with action "answer": say',
+    'plainly that this database does not contain it, and name the tables it does contain.',
+  ];
+
+  // The schema section is filtered down to the tables picked for this question, so without
+  // this the model reports whatever survived that filter as the database's entire contents.
+  if (tableNames.length <= MAX_LISTED_TABLES) {
+    lines.push(
+      '',
+      `EVERY TABLE IN [${database}] (${tableNames.length}) - the schema section below shows only some of them:`,
+      tableNames.join(', ')
+    );
+  }
+
+  return lines.join('\n');
+}
+
 /** Latest bill date in the database, so the model can explain an empty "today" result. */
 export const FRESHNESS_QUERY =
   'SELECT MAX([EIDocDate]) AS [lastBill], COUNT(*) AS [bills] FROM [dbo].[InvTranTbl]' +

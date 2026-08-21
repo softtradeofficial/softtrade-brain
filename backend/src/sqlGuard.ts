@@ -35,6 +35,7 @@ const FORBIDDEN = [
   /\bOPENDATASOURCE\b/i,
   /\bBULK\b/i,
   /\bDBCC\b/i,
+  /\bUSE\s/i,
   /\bSET\s/i,
   /\bxp_/i,
   /\bsp_/i,

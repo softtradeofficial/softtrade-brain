@@ -8,6 +8,8 @@ const client = new OpenAI({ apiKey: config.openai.apiKey });
 export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
+  /** The SQL that produced an assistant turn, so follow-up questions can reuse its tables. */
+  sql?: string;
 }
 
 export type Plan =
@@ -37,6 +39,76 @@ const FALLBACK_TABLES = [
 const MAX_SELECTED_TABLES = 12;
 
 /**
+ * Table names referenced by a query, read straight back out of the SQL.
+ *
+ * A follow-up ("and which of those is highest?", "same for last month") rarely names its
+ * tables, so selecting from the question alone drops whatever the previous answer used.
+ */
+export function tablesFromSql(sql: string): string[] {
+  const found = new Set<string>();
+  const pattern = /\b(?:FROM|JOIN)\s+(\[?\w+\]?\s*\.\s*)?\[?(\w+)\]?/gi;
+
+  for (const match of sql.matchAll(pattern)) {
+    const schema = match[1] ? match[1].replace(/[[\]\s.]/g, '') : 'dbo';
+    found.add(`${schema}.${match[2]}`);
+  }
+
+  return [...found];
+}
+
+/** Words that appear in almost every question and match nothing useful. */
+const STOP_WORDS = new Set([
+  'show', 'list', 'give', 'tell', 'find', 'display', 'want', 'need', 'please', 'have', 'with',
+  'what', 'which', 'when', 'where', 'whom', 'this', 'that', 'these', 'those', 'their', 'there',
+  'them', 'they', 'from', 'into', 'about', 'many', 'much', 'most', 'more', 'less', 'total',
+  'count', 'sum', 'each', 'every', 'all', 'any', 'some', 'other', 'same', 'particular',
+  'perticular', 'recent', 'latest', 'last', 'first', 'today', 'yesterday', 'month', 'year',
+  'date', 'data', 'database', 'table', 'tables', 'column', 'row', 'rows', 'record', 'records',
+  'value', 'name', 'names', 'number', 'detail', 'details', 'info', 'information', 'and', 'the',
+  'for', 'are', 'was', 'were', 'how', 'who', 'why', 'per', 'top', 'get',
+]);
+
+/**
+ * Tables whose name literally contains a word from the question.
+ *
+ * The model-driven selection below is biased by the sales glossary and will occasionally miss
+ * a whole subject area - it answered "there are no user permission tables" on a database that
+ * has UserRoles and RoleMaster. This costs nothing and does not miss an exact name match.
+ */
+export function tablesMatchingQuestion(question: string, tableNames: string[], limit = 8): string[] {
+  const words = question
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4 && !STOP_WORDS.has(word))
+    .map((word) => (word.endsWith('s') && word.length > 4 ? word.slice(0, -1) : word));
+
+  if (!words.length) return [];
+
+  const scored = tableNames
+    .map((qualified) => {
+      const name = qualified.split('.').pop()!.toLowerCase();
+      const hits = words.filter((word) => name.includes(word));
+      // Prefer tables matching more of the question, then the tightest name for that match.
+      return { qualified, score: hits.length, length: name.length };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.length - b.length);
+
+  return scored.slice(0, limit).map((entry) => entry.qualified);
+}
+
+/** Tables used by the most recent assistant turns, newest first. */
+export function recentTables(history: ChatTurn[]): string[] {
+  const found = new Set<string>();
+  for (const turn of [...history].reverse()) {
+    if (turn.role !== 'assistant' || !turn.sql) continue;
+    for (const table of tablesFromSql(turn.sql)) found.add(table);
+    if (found.size >= MAX_SELECTED_TABLES) break;
+  }
+  return [...found].slice(0, MAX_SELECTED_TABLES);
+}
+
+/**
  * Stage one: pick the handful of tables a question needs.
  *
  * Sending all 246 tables with their 5,000 columns costs ~25,000 tokens per question, which
@@ -46,7 +118,9 @@ const MAX_SELECTED_TABLES = 12;
 export async function selectTables(
   question: string,
   history: ChatTurn[],
-  tableNames: string
+  tableNames: string,
+  previous: string[] = [],
+  nameMatches: string[] = []
 ): Promise<string[]> {
   const response = await client.chat.completions.create({
     model: config.openai.model,
@@ -61,12 +135,31 @@ export async function selectTables(
           'Include every table needed for joins, especially the master tables that hold readable',
           'names for any id you will need to resolve.',
           'If the question is a greeting or unrelated to the database, reply {"tables":[]}.',
+          previous.length
+            ? [
+                '',
+                `The previous answer in this conversation used: ${previous.join(', ')}.`,
+                'Short or vague questions are almost always follow-ups about that same subject, even',
+                'when they are worded loosely or contain typos. Keep those tables in your answer',
+                'unless the question has clearly moved on to a different subject.',
+              ].join('\n')
+            : '',
+          nameMatches.length
+            ? [
+                '',
+                `These table names contain words from the question: ${nameMatches.join(', ')}.`,
+                'The glossary below is about sales and stock; it says nothing about other parts of',
+                'the system. When the question is about one of those, trust these names over it.',
+              ].join('\n')
+            : '',
           '',
           BUSINESS_GLOSSARY,
           '',
           'AVAILABLE TABLES:',
           tableNames,
-        ].join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
       },
       ...history.slice(-4).map((turn) => ({ role: turn.role, content: turn.content } as const)),
       { role: 'user', content: question },
@@ -82,9 +175,16 @@ export async function selectTables(
   }
 }
 
-/** Normalises selected names into the lookup set `renderSchemaForPrompt` expects. */
-export function toTableFilter(selected: string[]): Set<string> {
-  const names = selected.length ? selected : FALLBACK_TABLES;
+/**
+ * Normalises selected names into the lookup set `renderSchemaForPrompt` expects.
+ *
+ * The previous turn's tables are always included: if the selection step misreads a follow-up,
+ * the schema still contains what the conversation was already about.
+ */
+export function toTableFilter(selected: string[], previous: string[] = []): Set<string> {
+  const chosen = selected.length ? selected : previous.length ? previous : FALLBACK_TABLES;
+  const names = [...new Set([...chosen, ...previous])];
+
   const filter = new Set<string>();
   for (const name of names) {
     const lower = name.toLowerCase();

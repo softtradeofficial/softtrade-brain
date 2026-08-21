@@ -186,6 +186,7 @@ here: the data-currency note sat in the user turn and the model ignored it every
 | Query timeout | `.env` → `QUERY_TIMEOUT_MS` | 30000 |
 | How long the schema is cached | `.env` → `SCHEMA_TTL_MS` | 600000 (10 min) |
 | Which schemas are visible | `.env` → `ALLOWED_SCHEMAS` | `dbo` |
+| Which databases the dropdown offers | `.env` → `ALLOWED_DATABASES` / `DB_NAME_PATTERN` | `stm_%` |
 | Max tables sent per question | `backend/src/llm.ts` line 37 → `MAX_SELECTED_TABLES` | 12 |
 | Model | `.env` → `OPENAI_MODEL` | `gpt-4o` |
 

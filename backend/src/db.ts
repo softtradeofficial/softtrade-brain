@@ -1,12 +1,13 @@
 import * as sql from 'mssql';
 import { config } from './config';
 
-let poolPromise: Promise<sql.ConnectionPool> | null = null;
+/** One pool per database, so switching client databases does not tear down the others. */
+const pools = new Map<string, Promise<sql.ConnectionPool>>();
 
-function buildConfig(): sql.config {
+function buildConfig(database: string): sql.config {
   const base: sql.config = {
     server: config.db.server,
-    database: config.db.database,
+    database,
     port: config.db.instanceName ? undefined : config.db.port,
     requestTimeout: config.queryTimeoutMs,
     connectionTimeout: 15000,
@@ -32,21 +33,109 @@ function buildConfig(): sql.config {
   return base;
 }
 
-export function getPool(): Promise<sql.ConnectionPool> {
-  if (!poolPromise) {
-    poolPromise = new sql.ConnectionPool(buildConfig())
+export function getPool(database?: string): Promise<sql.ConnectionPool> {
+  const target = database || config.db.database;
+  let pending = pools.get(target);
+
+  if (!pending) {
+    pending = new sql.ConnectionPool(buildConfig(target))
       .connect()
       .then((pool) => {
-        console.log(`[db] connected to ${config.db.server}/${config.db.database}`);
-        pool.on('error', (err) => console.error('[db] pool error', err));
+        console.log(`[db] connected to ${config.db.server}/${target}`);
+        pool.on('error', (err) => console.error(`[db] pool error (${target})`, err));
         return pool;
       })
       .catch((err) => {
-        poolPromise = null;
+        pools.delete(target);
         throw err;
       });
+    pools.set(target, pending);
   }
-  return poolPromise;
+
+  return pending;
+}
+
+export interface DatabaseInfo {
+  name: string;
+  isDefault: boolean;
+}
+
+const DATABASES_SQL = `
+SELECT [name]
+FROM sys.databases
+WHERE [state] = 0
+  AND [name] NOT IN ('master', 'model', 'msdb', 'tempdb')
+  AND HAS_DBACCESS([name]) = 1
+ORDER BY [name];
+`;
+
+let databaseCache: { value: DatabaseInfo[]; expiresAt: number } | null = null;
+
+/** Databases this login can read, narrowed by ALLOWED_DATABASES / DB_NAME_PATTERN. */
+export async function listDatabases(forceRefresh = false): Promise<DatabaseInfo[]> {
+  if (!forceRefresh && databaseCache && databaseCache.expiresAt > Date.now()) {
+    return databaseCache.value;
+  }
+
+  const allowed = config.db.allowedDatabases;
+  let names: string[];
+
+  if (allowed.length) {
+    // An explicit allowlist is authoritative - never probe the server for anything else.
+    names = [...allowed];
+  } else {
+    const pool = await getPool();
+    const result = await pool.request().query(DATABASES_SQL);
+    names = (result.recordset as { name: string }[]).map((row) => row.name);
+
+    if (config.db.namePattern) {
+      const pattern = likeToRegExp(config.db.namePattern);
+      names = names.filter((name) => pattern.test(name));
+    }
+  }
+
+  // The configured default is always offered, even when a filter would hide it.
+  if (!names.some((name) => name.toLowerCase() === config.db.database.toLowerCase())) {
+    names.unshift(config.db.database);
+  }
+
+  const value = names.map((name) => ({
+    name,
+    isDefault: name.toLowerCase() === config.db.database.toLowerCase(),
+  }));
+
+  databaseCache = { value, expiresAt: Date.now() + config.schemaTtlMs };
+  return value;
+}
+
+/** Translates a SQL LIKE pattern (% and _) into an anchored, case-insensitive expression. */
+function likeToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, (match) => `\\${match}`);
+  const body = escaped.replace(/%/g, '.*').replace(/_/g, '.');
+  return new RegExp(`^${body}$`, 'i');
+}
+
+export class UnknownDatabaseError extends Error {
+  constructor(name: string) {
+    super(`Database "${name}" is not available. Pick one from GET /api/databases.`);
+    this.name = 'UnknownDatabaseError';
+  }
+}
+
+/**
+ * Maps a requested database name onto one we actually offer. The name goes into a
+ * connection string rather than into SQL text, but it still has to come from our own list.
+ */
+export async function resolveDatabase(requested?: unknown): Promise<string> {
+  if (typeof requested !== 'string' || !requested.trim()) return config.db.database;
+
+  const wanted = requested.trim().toLowerCase();
+  if (wanted === config.db.database.toLowerCase()) return config.db.database;
+
+  const available = await listDatabases();
+  const match = available.find((entry) => entry.name.toLowerCase() === wanted);
+  if (!match) throw new UnknownDatabaseError(requested.trim());
+  return match.name;
 }
 
 export interface QueryResult {
@@ -58,8 +147,8 @@ export interface QueryResult {
 }
 
 /** Runs a read-only query and normalises the result for the API layer. */
-export async function runQuery(query: string): Promise<QueryResult> {
-  const pool = await getPool();
+export async function runQuery(query: string, database?: string): Promise<QueryResult> {
+  const pool = await getPool(database);
   const started = Date.now();
   const request = pool.request();
   const result = await request.query(query);

@@ -47,7 +47,9 @@ Fill in `.env`:
 | --- | --- |
 | `OPENAI_API_KEY` | Your OpenAI key. |
 | `OPENAI_MODEL` | Defaults to `gpt-4o`. |
-| `DB_SERVER`, `DB_DATABASE` | Required. |
+| `DB_SERVER`, `DB_DATABASE` | Required. `DB_DATABASE` is the one selected when the page loads. |
+| `ALLOWED_DATABASES` | Databases offered in the sidebar dropdown, comma separated. Empty means every database the login can read. |
+| `DB_NAME_PATTERN` | Narrows that discovery with a SQL `LIKE` pattern, e.g. `stm_%`. |
 | `DB_USER`, `DB_PASSWORD` | SQL authentication. **Use a `db_datareader`-only login.** |
 | `DB_INSTANCE` | For named instances (e.g. `SQLEXPRESS`) instead of `DB_PORT`. |
 | `ALLOWED_SCHEMAS` | Optional whitelist, e.g. `dbo,reporting`. Empty means all schemas. |
@@ -151,8 +153,13 @@ anything that matters.
 }
 ```
 
-`GET /api/schema` — the discovered tables and columns (add `?refresh=true` to re-introspect).
+`GET /api/schema` — the discovered tables and columns (add `?refresh=true` to re-introspect,
+`?database=<name>` to introspect another client database).
+`GET /api/databases` — the databases the dropdown offers.
 `GET /api/health` — connection and model info.
+
+`POST /api/chat` takes an optional `database` field; without it the question runs against
+`DB_DATABASE`. Any name outside the offered list is rejected with a 400.
 
 ## Notes
 

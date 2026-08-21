@@ -11,7 +11,19 @@
     <div class="conn">
       <div class="conn__row">
         <span class="conn__label">Database</span>
-        <span class="conn__value">{{ database || 'not connected' }}</span>
+        <select
+          class="conn__select"
+          *ngIf="databases.length > 1; else singleDatabase"
+          [ngModel]="database"
+          (ngModelChange)="onDatabaseChange($event)"
+          [disabled]="loading"
+          title="Switch to another client database"
+        >
+          <option *ngFor="let entry of databases" [value]="entry.name">{{ entry.name }}</option>
+        </select>
+        <ng-template #singleDatabase>
+          <span class="conn__value">{{ database || 'not connected' }}</span>
+        </ng-template>
       </div>
       <div class="conn__row">
         <span class="conn__label">Model</span>
@@ -19,7 +31,7 @@
       </div>
       <div class="conn__row">
         <span class="conn__label">Tables</span>
-        <span class="conn__value">{{ tables.length }}</span>
+        <span class="conn__value">{{ schemaLoading ? 'loading...' : tables.length }}</span>
       </div>
     </div>
 
@@ -61,6 +73,7 @@
     </header>
 
     <div class="banner" *ngIf="connectionError">{{ connectionError }}</div>
+    <div class="banner banner--info" *ngIf="switchNotice && !connectionError">{{ switchNotice }}</div>
 
     <section class="scroll" #scrollPane>
       <div class="welcome" *ngIf="!messages.length">

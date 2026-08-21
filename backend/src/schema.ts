@@ -1,6 +1,6 @@
 import { config } from './config';
 import { getPool } from './db';
-import { isExcludedTable, FRESHNESS_QUERY, freshnessNote } from './domain';
+import { isExcludedTable, FRESHNESS_QUERY, freshnessNote, unfamiliarDatabaseNote } from './domain';
 
 export interface ColumnInfo {
   name: string;
@@ -30,7 +30,8 @@ export interface DatabaseSchema {
   loadedAt: string;
 }
 
-let cache: { value: DatabaseSchema; expiresAt: number } | null = null;
+/** Schema cache per database - each client database has its own tables and glossary notes. */
+const cache = new Map<string, { value: DatabaseSchema; expiresAt: number }>();
 
 const COLUMNS_SQL = `
 SELECT
@@ -80,8 +81,8 @@ function formatType(row: Record<string, unknown>): string {
   return type;
 }
 
-async function introspect(): Promise<DatabaseSchema> {
-  const pool = await getPool();
+async function introspect(database: string): Promise<DatabaseSchema> {
+  const pool = await getPool(database);
   const [columnsResult, fkResult, freshness] = await Promise.all([
     pool.request().query(COLUMNS_SQL),
     pool.request().query(FOREIGN_KEYS_SQL),
@@ -90,7 +91,7 @@ async function introspect(): Promise<DatabaseSchema> {
   ]);
 
   const freshRow = freshness?.recordset?.[0] as Record<string, unknown> | undefined;
-  const notes = freshRow ? freshnessNote(freshRow['lastBill'], freshRow['bills']) : '';
+  const dataNote = freshRow ? freshnessNote(freshRow['lastBill'], freshRow['bills']) : '';
 
   const allowed = config.allowedSchemas;
   const byTable = new Map<string, TableInfo>();
@@ -128,22 +129,29 @@ async function introspect(): Promise<DatabaseSchema> {
     }))
     .filter((fk) => byTable.has(fk.from) && byTable.has(fk.to));
 
+  const tables = [...byTable.values()];
+  const tableNames = tables.map((table) => `${table.schema}.${table.name}`);
+
   return {
-    database: config.db.database,
-    tables: [...byTable.values()],
+    database,
+    tables,
     foreignKeys,
-    notes,
+    notes: [unfamiliarDatabaseNote(database, tableNames), dataNote].filter(Boolean).join('\n\n'),
     loadedAt: new Date().toISOString(),
   };
 }
 
-export async function getSchema(forceRefresh = false): Promise<DatabaseSchema> {
-  if (!forceRefresh && cache && cache.expiresAt > Date.now()) {
-    return cache.value;
+export async function getSchema(database?: string, forceRefresh = false): Promise<DatabaseSchema> {
+  const target = database || config.db.database;
+  const cached = cache.get(target);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
-  const value = await introspect();
-  cache = { value, expiresAt: Date.now() + config.schemaTtlMs };
-  console.log(`[schema] loaded ${value.tables.length} tables/views, ${value.foreignKeys.length} foreign keys`);
+  const value = await introspect(target);
+  cache.set(target, { value, expiresAt: Date.now() + config.schemaTtlMs });
+  console.log(
+    `[schema] ${target}: loaded ${value.tables.length} tables/views, ${value.foreignKeys.length} foreign keys`
+  );
   return value;
 }
 
@@ -155,6 +163,13 @@ export function renderTableNamesForPrompt(schema: DatabaseSchema): string {
 }
 
 /**
+ * How many columns the whole schema may cost before the "nothing matched" fallback gives up
+ * and sends bare table names instead. A 220-table SoftTrade database is far past this; the
+ * small companion databases on the same server are nowhere near it.
+ */
+const FALLBACK_COLUMN_BUDGET = 800;
+
+/**
  * Compact, token-efficient rendering of the schema for the system prompt.
  * Passing `only` restricts it to the tables a question actually needs, which keeps the
  * prompt inside the account's tokens-per-minute limit on a 246-table database.
@@ -162,13 +177,31 @@ export function renderTableNamesForPrompt(schema: DatabaseSchema): string {
 export function renderSchemaForPrompt(schema: DatabaseSchema, only?: Set<string>): string {
   const lines: string[] = [`Database: ${schema.database} (Microsoft SQL Server)`, '', 'TABLES AND VIEWS:'];
 
-  const wanted = only
+  let wanted = only
     ? schema.tables.filter(
         (table) =>
           only.has(`${table.schema}.${table.name}`.toLowerCase()) ||
           only.has(table.name.toLowerCase())
       )
     : schema.tables;
+
+  // The selection step matches nothing on a database that does not follow the SoftTrade
+  // layout, and an empty schema makes the model ask the user for one. Send the whole thing
+  // instead whenever it is small enough to afford.
+  if (only && !wanted.length) {
+    const columnCount = schema.tables.reduce((total, table) => total + table.columns.length, 0);
+    wanted = columnCount <= FALLBACK_COLUMN_BUDGET ? schema.tables : [];
+  }
+
+  if (!wanted.length) {
+    // Too large to send in full, and nothing matched. Names alone still let the model say
+    // what this database holds rather than guess at columns it has never seen.
+    lines.push(
+      '(no table matched this question - only the names are listed, so do not guess at columns)',
+      renderTableNamesForPrompt(schema)
+    );
+    return lines.join('\n');
+  }
 
   for (const table of wanted) {
     const cols = table.columns
