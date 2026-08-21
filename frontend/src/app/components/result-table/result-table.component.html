@@ -1,0 +1,37 @@
+<div class="result" *ngIf="rows.length && !isScalar">
+  <div class="result__bar">
+    <span class="result__meta">
+      {{ rowCount | number }} row{{ rowCount === 1 ? '' : 's' }}
+      <span *ngIf="truncated"> &middot; showing first {{ rows.length | number }}</span>
+      <span *ngIf="elapsedMs"> &middot; {{ elapsedMs | number }} ms</span>
+    </span>
+    <span class="result__actions">
+      <button type="button" class="result__btn" (click)="downloadCsv()">CSV</button>
+      <button
+        type="button"
+        class="result__btn result__btn--excel"
+        (click)="downloadExcel()"
+        [disabled]="exporting"
+      >
+        {{ exporting ? 'Exporting...' : 'Excel' }}
+      </button>
+    </span>
+  </div>
+
+  <div class="result__scroll">
+    <table>
+      <thead>
+        <tr>
+          <th *ngFor="let column of columns; trackBy: trackByIndex">{{ column }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let row of rows; trackBy: trackByIndex">
+          <td *ngFor="let column of columns; trackBy: trackByIndex" [title]="format(row[column])">
+            {{ format(row[column]) }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

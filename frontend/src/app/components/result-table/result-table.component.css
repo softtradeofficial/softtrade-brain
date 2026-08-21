@@ -1,0 +1,95 @@
+.result {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.result__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-3);
+}
+
+.result__meta {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.result__actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.result__btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.result__btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.result__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.result__btn--excel:hover:not(:disabled) {
+  border-color: #21a366; /* Excel green */
+  color: #4cc38a;
+}
+
+.result__scroll {
+  max-height: 340px;
+  overflow: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 9px 12px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+tbody tr:hover td {
+  background: var(--surface-3);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}

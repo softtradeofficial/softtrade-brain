@@ -1,0 +1,141 @@
+<div class="shell">
+  <aside class="sidebar" [class.sidebar--open]="showSchema">
+    <div class="brand">
+      <div class="brand__mark">ST</div>
+      <div>
+        <div class="brand__name">SoftTrade Brain</div>
+        <div class="brand__sub">Ask your database anything</div>
+      </div>
+    </div>
+
+    <div class="conn">
+      <div class="conn__row">
+        <span class="conn__label">Database</span>
+        <span class="conn__value">{{ database || 'not connected' }}</span>
+      </div>
+      <div class="conn__row">
+        <span class="conn__label">Model</span>
+        <span class="conn__value">{{ model || 'gpt-4o' }}</span>
+      </div>
+      <div class="conn__row">
+        <span class="conn__label">Tables</span>
+        <span class="conn__value">{{ tables.length }}</span>
+      </div>
+    </div>
+
+    <div class="schema">
+      <input
+        class="schema__filter"
+        type="text"
+        placeholder="Filter tables and columns"
+        [(ngModel)]="schemaFilter"
+      />
+
+      <div class="schema__list">
+        <details class="schema__item" *ngFor="let table of filteredTables; trackBy: trackByName">
+          <summary>
+            {{ table.name }}
+            <span class="schema__kind" *ngIf="table.kind === 'view'">view</span>
+          </summary>
+          <ul>
+            <li *ngFor="let column of table.columns">{{ column }}</li>
+          </ul>
+        </details>
+
+        <p class="schema__empty" *ngIf="!filteredTables.length">
+          {{ tables.length ? 'No table matches that filter.' : 'Schema not loaded yet.' }}
+        </p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button type="button" class="icon-btn topbar__toggle" (click)="showSchema = !showSchema">
+        Schema
+      </button>
+      <h1>Chat with your data</h1>
+      <button type="button" class="icon-btn" (click)="clear()" [disabled]="!messages.length">
+        New chat
+      </button>
+    </header>
+
+    <div class="banner" *ngIf="connectionError">{{ connectionError }}</div>
+
+    <section class="scroll" #scrollPane>
+      <div class="welcome" *ngIf="!messages.length">
+        <h2>What would you like to know?</h2>
+        <p>
+          Ask in plain English. Your question is turned into a read-only SQL query, run against
+          <strong>{{ database || 'your database' }}</strong>, and the result is explained back to you.
+        </p>
+        <div class="chips">
+          <button
+            type="button"
+            class="chip"
+            *ngFor="let suggestion of suggestions"
+            (click)="useSuggestion(suggestion)"
+          >
+            {{ suggestion }}
+          </button>
+        </div>
+      </div>
+
+      <article
+        class="msg"
+        *ngFor="let message of messages; trackBy: trackById"
+        [class.msg--user]="message.role === 'user'"
+      >
+        <div class="msg__avatar">{{ message.role === 'user' ? 'You' : 'AI' }}</div>
+
+        <div class="msg__body">
+          <div class="bubble" [class.bubble--error]="message.failed">
+            <div class="typing" *ngIf="message.pending">
+              <span></span><span></span><span></span>
+            </div>
+            <p class="msg__text" *ngIf="!message.pending">{{ message.text }}</p>
+          </div>
+
+          <app-result-table
+            *ngIf="!message.pending && message.rows?.length"
+            [columns]="message.columns || []"
+            [rows]="message.rows || []"
+            [rowCount]="message.rowCount || 0"
+            [truncated]="message.truncated || false"
+            [elapsedMs]="message.elapsedMs || 0"
+          ></app-result-table>
+
+          <div class="sql" *ngIf="!message.pending && message.sql">
+            <div class="sql__bar">
+              <button type="button" class="sql__toggle" (click)="toggleSql(message)">
+                {{ message.showSql ? 'Hide SQL' : 'View SQL' }}
+              </button>
+              <span class="sql__intent" *ngIf="message.intent">{{ message.intent }}</span>
+              <button type="button" class="sql__copy" *ngIf="message.showSql" (click)="copySql(message)">
+                Copy
+              </button>
+            </div>
+            <pre *ngIf="message.showSql">{{ message.sql }}</pre>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <footer class="composer">
+      <textarea
+        rows="1"
+        placeholder="e.g. How many bills were created today?"
+        [(ngModel)]="draft"
+        (keydown)="onKeydown($event)"
+        [disabled]="loading"
+      ></textarea>
+      <button type="button" class="send" (click)="send()" [disabled]="loading || !draft.trim()">
+        {{ loading ? 'Thinking...' : 'Send' }}
+      </button>
+    </footer>
+    <p class="disclaimer">
+      Read-only access. Generated SQL is checked before it runs - always review the SQL for anything
+      you plan to act on.
+    </p>
+  </main>
+</div>
