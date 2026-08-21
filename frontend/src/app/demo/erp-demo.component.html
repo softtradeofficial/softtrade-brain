@@ -12,6 +12,7 @@
       <select id="userSelect" [(ngModel)]="selectedUserId" (change)="onUserChange()">
         <option [value]="0">👑 Super Administrator (Full Unrestricted Access)</option>
         <option [value]="61">👤 AMITK - Office Executive (Divisions 45, 52, 53)</option>
+        <option [value]="126">📦 RAMVILAS YADAV - Production Manager (Stock Only)</option>
         <option [value]="999">📦 STORE_KEEPER (Stock Only - No Sales Bills Access)</option>
       </select>
       <span class="erp-badge" [class.erp-badge--admin]="selectedUserId === 0">

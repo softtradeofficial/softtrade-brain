@@ -15,7 +15,7 @@ export class ChatService {
   public configure(options: { apiUrl?: string; authToken?: string; customHeaders?: Record<string, string> }): void {
     if (options.apiUrl) this.baseUrl = options.apiUrl.replace(/\/+$/, '');
     if (options.authToken !== undefined) this.authToken = options.authToken;
-    if (options.customHeaders) this.customHeaders = options.customHeaders;
+    if (options.customHeaders !== undefined) this.customHeaders = options.customHeaders;
   }
 
   private getHeaders(): HttpHeaders {

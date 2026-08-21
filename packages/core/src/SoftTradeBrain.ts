@@ -2,7 +2,7 @@ import { DatabaseClient } from './db';
 import { SchemaManager } from './schema';
 import { LLMClient } from './llm';
 import { guardSql } from './sqlGuard';
-import { resolveUserContextFromDb } from './permissions';
+import { resolveUserContextFromDb, filterTablesForUser } from './permissions';
 import type {
   AskOptions,
   BrainConfig,
@@ -10,6 +10,7 @@ import type {
   ChatTurn,
   DatabaseSchema,
   QueryResult,
+  TableInfo,
   UserContext,
 } from './types';
 
@@ -66,6 +67,34 @@ export class SoftTradeBrain {
     }
 
     let guarded = guardSql(plan.sql, maxRows);
+
+    // Hard server-side security check: verify that all referenced tables are permitted for this user
+    if (user && !user.isSuperUser) {
+      const allowedTables = filterTablesForUser(schema.tables, user);
+      const allowedSet = new Set(allowedTables.map((t) => t.name.toLowerCase()));
+
+      const tableRefRegex = /(?:FROM|JOIN)\s+(?:\[?dbo\]?\.)?\[?([a-zA-Z0-9_]+)\]?/gi;
+      let match: RegExpExecArray | null;
+      while ((match = tableRefRegex.exec(guarded.sql)) !== null) {
+        const tbl = match[1].toLowerCase();
+        if (!allowedSet.has(tbl)) {
+          return {
+            answer:
+              'Access Denied: Your account role (' +
+              (user.roleName || 'Restricted') +
+              ") does not have permission to view '" +
+              match[1] +
+              "' data.",
+            sql: guarded.sql,
+            rows: [],
+            columns: [],
+            rowCount: 0,
+            error: 'Unauthorized table access: ' + match[1],
+          };
+        }
+      }
+    }
+
     let result: QueryResult;
 
     try {

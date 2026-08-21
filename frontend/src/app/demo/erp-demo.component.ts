@@ -8,23 +8,23 @@ import { Component } from '@angular/core';
 export class ErpDemoComponent {
   activeTab = 'ai-chat';
   selectedUserId = 0;
+  userHeaders: Record<string, string> = {};
 
   get selectedRoleLabel(): string {
-    if (this.selectedUserId === 0) return 'Super Administrator (All Access)';
-    if (this.selectedUserId === 61) return 'AMITK (Divisions 45, 52, 53)';
-    return 'STORE KEEPER (Stock Only)';
-  }
-
-  get userHeaders(): Record<string, string> {
-    if (this.selectedUserId === 0) {
-      return {};
-    }
-    return {
-      'X-User-Id': String(this.selectedUserId),
-    };
+    if (Number(this.selectedUserId) === 0) return 'Super Administrator (All Access)';
+    if (Number(this.selectedUserId) === 61) return 'AMITK - Office Executive (Divisions 45, 52, 53)';
+    if (Number(this.selectedUserId) === 126) return 'RAMVILAS YADAV - Production Manager (Stock Only)';
+    return 'STORE KEEPER (Stock Only - No Sales Bills Access)';
   }
 
   onUserChange(): void {
-    console.log('Switched simulated user to ID:', this.selectedUserId);
+    const id = Number(this.selectedUserId);
+    if (id === 0) {
+      this.userHeaders = {};
+    } else {
+      this.userHeaders = {
+        'X-User-Id': String(id),
+      };
+    }
   }
 }

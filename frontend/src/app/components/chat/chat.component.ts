@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, ElementRef, Input, OnInit, ViewChild } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, Input, OnChanges, OnInit, SimpleChanges, ViewChild } from '@angular/core';
 import { ChatService } from '../../services/chat.service';
 import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
 
@@ -7,7 +7,7 @@ import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
   templateUrl: './chat.component.html',
   styleUrls: ['./chat.component.css'],
 })
-export class ChatComponent implements OnInit, AfterViewChecked {
+export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
   @ViewChild('scrollPane') private scrollPane?: ElementRef<HTMLElement>;
 
   @Input() apiUrl?: string;
@@ -39,13 +39,11 @@ export class ChatComponent implements OnInit, AfterViewChecked {
   constructor(private chat: ChatService) {}
 
   ngOnInit(): void {
-    if (this.apiUrl || this.authToken || this.customHeaders) {
-      this.chat.configure({
-        apiUrl: this.apiUrl,
-        authToken: this.authToken,
-        customHeaders: this.customHeaders,
-      });
-    }
+    this.chat.configure({
+      apiUrl: this.apiUrl,
+      authToken: this.authToken,
+      customHeaders: this.customHeaders || {},
+    });
 
     this.chat.health().subscribe({
       next: (info) => {
@@ -58,6 +56,24 @@ export class ChatComponent implements OnInit, AfterViewChecked {
       },
     });
 
+    this.reloadSchema();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['apiUrl'] || changes['authToken'] || changes['customHeaders']) {
+      this.chat.configure({
+        apiUrl: this.apiUrl,
+        authToken: this.authToken,
+        customHeaders: this.customHeaders || {},
+      });
+      if (!changes['customHeaders']?.firstChange) {
+        this.clear();
+        this.reloadSchema();
+      }
+    }
+  }
+
+  public reloadSchema(): void {
     this.chat.schema().subscribe({
       next: (payload) => {
         this.tables = payload.tables;
