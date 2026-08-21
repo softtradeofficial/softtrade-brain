@@ -1,0 +1,77 @@
+<div class="erp-layout">
+  <!-- ERP Top Header -->
+  <header class="erp-header">
+    <div class="erp-header__brand">
+      <div class="erp-logo">ST</div>
+      <span class="erp-title">SoftTrade ERP <span>Enterprise Suite</span></span>
+    </div>
+
+    <!-- Active User & Role Switcher Simulator -->
+    <div class="erp-user-switcher">
+      <label for="userSelect">Simulate Logged-In User:</label>
+      <select id="userSelect" [(ngModel)]="selectedUserId" (change)="onUserChange()">
+        <option [value]="0">👑 Super Administrator (Full Unrestricted Access)</option>
+        <option [value]="61">👤 AMITK - Office Executive (Divisions 45, 52, 53)</option>
+        <option [value]="999">📦 STORE_KEEPER (Stock Only - No Sales Bills Access)</option>
+      </select>
+      <span class="erp-badge" [class.erp-badge--admin]="selectedUserId === 0">
+        {{ selectedRoleLabel }}
+      </span>
+    </div>
+  </header>
+
+  <!-- ERP Main Body -->
+  <div class="erp-body">
+    <!-- ERP Sidebar Navigation -->
+    <nav class="erp-nav">
+      <div class="erp-nav__group">Modules</div>
+      <button type="button" class="erp-nav__link" [class.active]="activeTab === 'dashboard'" (click)="activeTab = 'dashboard'">
+        📊 Dashboard
+      </button>
+      <button type="button" class="erp-nav__link" [class.active]="activeTab === 'ai-chat'" (click)="activeTab = 'ai-chat'">
+        ✨ SoftTrade AI Brain
+      </button>
+      <button type="button" class="erp-nav__link" [class.active]="activeTab === 'sales'" (click)="activeTab = 'sales'">
+        🧾 Sales & Invoicing
+      </button>
+      <button type="button" class="erp-nav__link" [class.active]="activeTab === 'inventory'" (click)="activeTab = 'inventory'">
+        📦 Stock & Inventory
+      </button>
+      <button type="button" class="erp-nav__link" [class.active]="activeTab === 'accounts'" (click)="activeTab = 'accounts'">
+        💰 Accounts & Ledgers
+      </button>
+    </nav>
+
+    <!-- ERP Content Area -->
+    <main class="erp-content">
+      <!-- AI Brain Embed Tab -->
+      <div class="ai-container" *ngIf="activeTab === 'ai-chat'">
+        <div class="ai-header-card">
+          <div>
+            <h2>SoftTrade AI Intelligence Assistant</h2>
+            <p>
+              Natural-language querying connected to your SQL Server database.
+              Permissions are actively restricted for <strong>{{ selectedRoleLabel }}</strong>.
+            </p>
+          </div>
+        </div>
+
+        <!-- THE EMBEDDED CHAT COMPONENT -->
+        <div class="ai-chat-wrapper">
+          <app-chat
+            [customHeaders]="userHeaders"
+            [placeholder]="'Ask about bills, party balances, stock, items...'">
+          </app-chat>
+        </div>
+      </div>
+
+      <!-- Simulated Standard ERP Dashboard View -->
+      <div class="dashboard-container" *ngIf="activeTab !== 'ai-chat'">
+        <div class="card">
+          <h2>{{ activeTab | uppercase }} Overview</h2>
+          <p>This is a standard ERP module screen. Click on <strong>✨ SoftTrade AI Brain</strong> in the left sidebar to open the embedded AI Assistant.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>

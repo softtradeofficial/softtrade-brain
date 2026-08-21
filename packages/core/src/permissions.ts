@@ -1,0 +1,171 @@
+import type * as sql from 'mssql';
+import type { TableInfo, UserContext } from './types';
+
+export const MODULE_TABLE_MAP: Record<string, string[]> = {
+  SALES: ['invtrantbl', 'sihdr', 'sidtl', 'ordhdr', 'orddtl', 'sigsttaxsummary'],
+  PURCHASE: ['invtrantbl', 'grndtl', 'gsttrandtl', 'irhdr'],
+  STOCK: ['stock', 'item', 'itembal', 'itemgroupbal', 'godownlotstk', 'itbatchbal', 'itlotstock', 'plotstock'],
+  ACCOUNTS: ['account', 'vheader', 'vntype', 'acbal', 'accurbal', 'acrepbal', 'tdsvhdtl', 'bkdetail', 'bankacdetails'],
+  PARTY: ['party', 'account', 'partysetting', 'partycatgcreditcontrol', 'partyitemgroup'],
+  COMPANY: ['company', 'companydivisionrelation', 'companysession'],
+  AREA: ['area', 'district', 'statemaster', 'station', 'country', 'headqtrdistrictrelation'],
+};
+
+const SENSITIVE_COLUMNS = new Set([
+  'userpwd',
+  'password',
+  'refcode',
+  'lockpwd',
+]);
+
+export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId: number): Promise<UserContext> {
+  const req = pool.request();
+  req.input('userId', userId);
+
+  const [userRes, divRes, itemGroupRes, partyTypeRes] = await Promise.all([
+    req.query(
+      'SELECT u.[id], u.[userCode], u.[userName], u.[Superuser], u.[RoleId], u.[CoSoftId], u.[AllDivision], ' +
+      'r.[Name] AS [RoleName] ' +
+      'FROM [dbo].[usermast] u ' +
+      'LEFT JOIN [dbo].[RoleMaster] r ON r.[id] = u.[RoleId] ' +
+      'WHERE u.[id] = @userId;'
+    ),
+    req.query('SELECT [DivId] FROM [dbo].[UserDivision] WHERE [UserId] = @userId;'),
+    req.query('SELECT [ItemGroupId] FROM [dbo].[UserItemGroups] WHERE [UserId] = @userId;'),
+    req.query('SELECT [PtType] FROM [dbo].[UserPartyType] WHERE [UserId] = @userId;'),
+  ]);
+
+  const user = userRes.recordset[0];
+  if (!user) {
+    throw new Error('User with id ' + userId + ' was not found in [dbo].[usermast].');
+  }
+
+  const isSuperUser = !!user.Superuser;
+  const divisions = (divRes.recordset as Array<{ DivId: number }>).map((r) => r.DivId);
+  const itemGroups = (itemGroupRes.recordset as Array<{ ItemGroupId: number }>).map((r) => r.ItemGroupId);
+  const partyTypes = (partyTypeRes.recordset as Array<{ PtType: string }>).map((r) => r.PtType);
+
+  if (isSuperUser) {
+    return {
+      userId: user.id,
+      userCode: user.userCode,
+      userName: user.userName,
+      isSuperUser: true,
+      roleId: user.RoleId,
+      roleName: user.RoleName || 'SuperUser',
+      coSoftId: user.CoSoftId,
+      allowedDivisions: divisions,
+      allowedItemGroups: itemGroups,
+      allowedPartyTypes: partyTypes,
+      allowedModules: Object.keys(MODULE_TABLE_MAP),
+    };
+  }
+
+  const rolesReq = pool.request();
+  rolesReq.input('roleId', user.RoleId);
+  const roleRes = await rolesReq.query(
+    'SELECT [MenuId], [ViewRights] FROM [dbo].[UserRoles] WHERE [RoleId] = @roleId AND [ViewRights] = 1;'
+  );
+
+  const allowedModules: string[] = ['AREA', 'COMPANY'];
+  const menuIds = new Set((roleRes.recordset as Array<{ MenuId: number }>).map((r) => r.MenuId));
+
+  let hasSales = false;
+  let hasPurchase = false;
+  let hasAccounts = false;
+  let hasStock = false;
+  let hasParty = false;
+
+  for (const mid of menuIds) {
+    if (mid >= 1000 && mid < 2000) hasSales = true;
+    else if (mid >= 2000 && mid < 3000) hasPurchase = true;
+    else if (mid >= 3000 && mid < 4000) hasAccounts = true;
+    else if (mid >= 4000 && mid < 5000) hasStock = true;
+    else if (mid >= 5000 && mid < 6000) hasParty = true;
+  }
+
+  if (hasSales || menuIds.size === 0) allowedModules.push('SALES');
+  if (hasPurchase) allowedModules.push('PURCHASE');
+  if (hasAccounts) allowedModules.push('ACCOUNTS');
+  if (hasStock) allowedModules.push('STOCK');
+  if (hasParty) allowedModules.push('PARTY');
+
+  return {
+    userId: user.id,
+    userCode: user.userCode,
+    userName: user.userName,
+    isSuperUser: false,
+    roleId: user.RoleId,
+    roleName: user.RoleName,
+    coSoftId: user.CoSoftId,
+    allowedDivisions: user.AllDivision ? undefined : divisions,
+    allowedItemGroups: itemGroups.length ? itemGroups : undefined,
+    allowedPartyTypes: partyTypes.length ? partyTypes : undefined,
+    allowedModules,
+  };
+}
+
+export function filterTablesForUser(tables: TableInfo[], user?: UserContext): TableInfo[] {
+  if (!user || user.isSuperUser) {
+    return tables.map(maskSensitiveColumns);
+  }
+
+  const allowedModules = new Set((user.allowedModules || []).map((m) => m.toUpperCase()));
+  const explicitAllowed = user.allowedTables ? new Set(user.allowedTables.map((t) => t.toLowerCase())) : null;
+  const restricted = user.restrictedTables ? new Set(user.restrictedTables.map((t) => t.toLowerCase())) : new Set<string>();
+
+  return tables
+    .filter((table) => {
+      const lowerName = table.name.toLowerCase();
+      if (restricted.has(lowerName)) return false;
+      if (explicitAllowed && explicitAllowed.has(lowerName)) return true;
+
+      for (const [moduleName, moduleTables] of Object.entries(MODULE_TABLE_MAP)) {
+        if (moduleTables.includes(lowerName)) {
+          return allowedModules.has(moduleName);
+        }
+      }
+
+      return true;
+    })
+    .map(maskSensitiveColumns);
+}
+
+function maskSensitiveColumns(table: TableInfo): TableInfo {
+  return {
+    ...table,
+    columns: table.columns.filter((c) => !SENSITIVE_COLUMNS.has(c.name.toLowerCase())),
+  };
+}
+
+export function buildUserScopePrompt(user?: UserContext): string {
+  if (!user || user.isSuperUser) return '';
+
+  const constraints: string[] = ['USER SECURITY & PERMISSION CONSTRAINTS (MANDATORY):'];
+
+  if (user.coSoftId) {
+    constraints.push(
+      '- Company boundary: MUST filter by [CoSoftId] = ' + user.coSoftId + ' on tables that contain a CoSoftId column (e.g. InvTranTbl, SIHDR, ORDHDR, Stock, Vheader).'
+    );
+  }
+
+  if (user.allowedDivisions && user.allowedDivisions.length > 0) {
+    const divs = user.allowedDivisions.join(', ');
+    constraints.push(
+      '- Division boundary: User is restricted to Division(s) [' + divs + ']. Filter [DivId] IN (' + divs + ') on tables containing DivId.'
+    );
+  }
+
+  if (user.salesPersonId) {
+    constraints.push(
+      '- Sales representative boundary: Filter [SalePersonId] = ' + user.salesPersonId + ' or [SPId] = ' + user.salesPersonId + ' for sales queries.'
+    );
+  }
+
+  if (user.allowedPartyTypes && user.allowedPartyTypes.length > 0) {
+    const types = user.allowedPartyTypes.map((t) => "'" + t + "'").join(', ');
+    constraints.push('- Party type boundary: Filter [PtType] IN (' + types + ') on [Party].');
+  }
+
+  return constraints.join('\n');
+}

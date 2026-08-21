@@ -116,7 +116,7 @@ export const FRESHNESS_QUERY =
   'SELECT MAX([EIDocDate]) AS [lastBill], COUNT(*) AS [bills] FROM [dbo].[InvTranTbl]' +
   ` WHERE [InvSR] = '${SALES_INVOICE_SERIES}'`;
 
-export function freshnessNote(lastBill: unknown, bills: unknown): string {
+export function freshnessNote(lastBill: unknown, bills: unknown): string { 
   if (!lastBill) return '';
   const date = new Date(String(lastBill)).toISOString().slice(0, 10);
   return [

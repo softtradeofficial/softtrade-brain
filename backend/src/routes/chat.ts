@@ -1,99 +1,62 @@
 import { Router } from 'express';
-import { runQuery } from '../db';
-import { getSchema, renderSchemaForPrompt, renderTableNamesForPrompt } from '../schema';
-import {
-  explainResult,
-  planQuery,
-  repairQuery,
-  selectTables,
-  toTableFilter,
-  type ChatTurn,
-} from '../llm';
-import { guardSql, UnsafeSqlError } from '../sqlGuard';
+import { SoftTradeBrain, UnsafeSqlError } from '../../../packages/core/dist/index.js';
+import { config } from '../config';
 
 export const chatRouter = Router();
+
+const brain = new SoftTradeBrain({
+  db: {
+    server: config.db.server,
+    database: config.db.database,
+    user: config.db.user,
+    password: config.db.password,
+    instanceName: config.db.instanceName,
+    port: config.db.port,
+    encrypt: config.db.encrypt,
+    trustServerCertificate: config.db.trustServerCertificate,
+  },
+  openai: {
+    apiKey: config.openai.apiKey,
+    model: config.openai.model,
+  },
+  maxRows: config.maxRows,
+  maxRowsForSummary: config.maxRowsForSummary,
+  queryTimeoutMs: config.queryTimeoutMs,
+  schemaTtlMs: config.schemaTtlMs,
+  allowedSchemas: config.allowedSchemas,
+});
 
 interface ChatRequestBody {
   message?: unknown;
   history?: unknown;
-}
-
-function parseHistory(value: unknown): ChatTurn[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(
-      (turn): turn is ChatTurn =>
-        !!turn &&
-        typeof turn === 'object' &&
-        typeof (turn as ChatTurn).content === 'string' &&
-        ((turn as ChatTurn).role === 'user' || (turn as ChatTurn).role === 'assistant')
-    )
-    .slice(-10);
+  userId?: number;
+  user?: any;
 }
 
 chatRouter.post('/chat', async (req, res) => {
   const body = req.body as ChatRequestBody;
   const message = typeof body.message === 'string' ? body.message.trim() : '';
-  const history = parseHistory(body.history);
+  const history = Array.isArray(body.history) ? (body.history as any[]) : [];
 
   if (!message) {
     return res.status(400).json({ error: 'A "message" string is required.' });
   }
 
   try {
-    const schema = await getSchema();
+    // Resolve user context from header, body, or session
+    let user = body.user;
+    const userId = body.userId ?? (req.headers['x-user-id'] ? Number(req.headers['x-user-id']) : undefined);
 
-    // Pick the relevant tables first, then send only those columns. Sending all 246 tables
-    // costs ~25k tokens per question and trips the account's tokens-per-minute limit.
-    const selected = await selectTables(message, history, renderTableNamesForPrompt(schema));
-    const schemaText = renderSchemaForPrompt(schema, toTableFilter(selected));
-
-    let plan = await planQuery(message, history, schemaText, schema.notes);
-
-    if (plan.action === 'answer') {
-      return res.json({ answer: plan.message, sql: null, rows: [], columns: [], rowCount: 0 });
-    }
-
-    let guarded = guardSql(plan.sql);
-    let result;
-
-    try {
-      result = await runQuery(guarded.sql);
-    } catch (dbError) {
-      // One self-correction pass: SQL Server's own error message is usually enough
-      // for the model to fix a wrong column or join.
-      const dbMessage = dbError instanceof Error ? dbError.message : String(dbError);
-      console.warn('[chat] first query failed, retrying:', dbMessage);
-
-      const retryPlan = await repairQuery(message, guarded.sql, dbMessage, schemaText, schema.notes);
-      if (retryPlan.action !== 'query') {
-        return res.json({
-          answer: retryPlan.action === 'answer' ? retryPlan.message : dbMessage,
-          sql: guarded.sql,
-          rows: [],
-          columns: [],
-          rowCount: 0,
-          error: dbMessage,
-        });
+    if (!user && userId) {
+      try {
+        user = await brain.resolveUser(userId);
+      } catch (err) {
+        console.warn(`[chat] Could not resolve user ${userId}:`, err);
       }
-
-      plan = retryPlan;
-      guarded = guardSql(retryPlan.sql);
-      result = await runQuery(guarded.sql);
     }
 
-    const answer = await explainResult(message, guarded.sql, result, schema.notes);
-
-    return res.json({
-      answer,
-      sql: guarded.sql,
-      intent: plan.intent,
-      columns: result.columns,
-      rows: result.rows,
-      rowCount: result.rowCount,
-      truncated: result.truncated,
-      elapsedMs: result.elapsedMs,
-    });
+    const response = await brain.ask(message, history, { user });
+    return res.json(response);
   } catch (error) {
     if (error instanceof UnsafeSqlError) {
       return res.status(400).json({ error: error.message });
@@ -106,7 +69,7 @@ chatRouter.post('/chat', async (req, res) => {
 
 chatRouter.get('/schema', async (_req, res) => {
   try {
-    const schema = await getSchema(_req.query['refresh'] === 'true');
+    const schema = await brain.getSchema(_req.query['refresh'] === 'true');
     res.json({
       database: schema.database,
       loadedAt: schema.loadedAt,
@@ -120,3 +83,20 @@ chatRouter.get('/schema', async (_req, res) => {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
+
+chatRouter.get('/users', async (_req, res) => {
+  try {
+    const result = await brain.executeRawQuery(`
+      SELECT TOP (10) u.[id], u.[userCode], u.[userName], u.[Superuser], u.[RoleId], u.[CoSoftId],
+             r.[Name] AS [RoleName]
+      FROM [dbo].[usermast] u
+      LEFT JOIN [dbo].[RoleMaster] r ON r.[id] = u.[RoleId]
+      WHERE u.[deactivate] = 0 OR u.[deactivate] IS NULL
+      ORDER BY u.[id];
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+

@@ -6,11 +6,13 @@ import { FormsModule } from '@angular/forms';
 import { AppComponent } from './app.component';
 import { ChatComponent } from './components/chat/chat.component';
 import { ResultTableComponent } from './components/result-table/result-table.component';
+import { ErpDemoComponent } from './demo/erp-demo.component';
 
 @NgModule({
-  declarations: [AppComponent, ChatComponent, ResultTableComponent],
+  declarations: [AppComponent, ChatComponent, ResultTableComponent, ErpDemoComponent],
   imports: [BrowserModule, HttpClientModule, FormsModule],
   providers: [],
   bootstrap: [AppComponent],
 })
 export class AppModule {}
+

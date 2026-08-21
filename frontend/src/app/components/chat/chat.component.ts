@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, Input, OnInit, ViewChild } from '@angular/core';
 import { ChatService } from '../../services/chat.service';
 import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
 
@@ -9,6 +9,18 @@ import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
 })
 export class ChatComponent implements OnInit, AfterViewChecked {
   @ViewChild('scrollPane') private scrollPane?: ElementRef<HTMLElement>;
+
+  @Input() apiUrl?: string;
+  @Input() authToken?: string;
+  @Input() customHeaders?: Record<string, string>;
+  @Input() placeholder = 'Ask a question in plain English, e.g. "How many bills were created today?"';
+  @Input() suggestions: string[] = [
+    'How many companies are there?',
+    'How many bills were created today?',
+    'What is the total billed amount today?',
+    'Show the 10 most recent bills',
+    'Which company has the most bills this month?',
+  ];
 
   messages: ChatMessage[] = [];
   draft = '';
@@ -21,20 +33,20 @@ export class ChatComponent implements OnInit, AfterViewChecked {
   showSchema = false;
   schemaFilter = '';
 
-  readonly suggestions = [
-    'How many companies are there?',
-    'How many bills were created today?',
-    'What is the total billed amount today?',
-    'Show the 10 most recent bills',
-    'Which company has the most bills this month?',
-  ];
-
   private nextId = 1;
   private shouldScroll = false;
 
   constructor(private chat: ChatService) {}
 
   ngOnInit(): void {
+    if (this.apiUrl || this.authToken || this.customHeaders) {
+      this.chat.configure({
+        apiUrl: this.apiUrl,
+        authToken: this.authToken,
+        customHeaders: this.customHeaders,
+      });
+    }
+
     this.chat.health().subscribe({
       next: (info) => {
         this.database = info.database;
@@ -42,7 +54,7 @@ export class ChatComponent implements OnInit, AfterViewChecked {
       },
       error: () => {
         this.connectionError =
-          'Cannot reach the API on http://localhost:3000. Start it with "npm run dev" in the backend folder.';
+          'Cannot reach the API. Check connection or start the backend service.';
       },
     });
 

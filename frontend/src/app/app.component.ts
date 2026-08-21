@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 
 @Component({
   selector: 'app-root',
-  template: '<app-chat></app-chat>',
+  template: '<app-erp-demo></app-erp-demo>',
 })
 export class AppComponent {}
+
