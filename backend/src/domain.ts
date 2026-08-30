@@ -448,6 +448,22 @@ These mappings are verified. Prefer them over guessing from table names.
         - CRITICAL ASK-FIRST RULE: In bill-wise outstanding queries, ALWAYS ask the user first if they would like to include 'On Account' due balance records or show only specific bill references.
         - If 'On Account' is included: filter ([GLOS].[GlOsId] <> 'On  Account' OR [GLOS].[GlFinYear] = 9999).
         - If 'On Account' is excluded: filter [GLOS].[GlOsId] <> 'On  Account'.
+    - CRITICAL RULE FOR "PAYMENTS DONE AFTER X DAYS" / "BILLS PAID AFTER 180 DAYS" / DELAYED PAYMENT ANALYSIS:
+        When asked for bills or purchase invoices where payment was made after X days (e.g. 180 days, 45 days, etc.):
+        Join Bill Creation records (GlOsType = '1') with Payment / Settlement records (GlOsType = '2') in [dbo].[GLOS]:
+            WITH BillCreation AS (
+                SELECT g.[GlAccountId], a.[AcName] AS [PartyName], g.[GlOsId] AS [BillNo], g.[GlDate] AS [InvoiceDate], g.[GlDueDate] AS [DueDate], g.[GlAmount] AS [BillAmount], g.[GlFinYear] AS [BillFinYear]
+                FROM [dbo].[GLOS] g JOIN [dbo].[Account] a ON a.[id] = g.[GlAccountId] JOIN [dbo].[Schedule] s ON s.[id] = a.[ScheduleId]
+                WHERE g.[CoSoftId] = <cosoftid> AND g.[GlOsType] = '1' AND g.[GlOsId] <> 'On  Account' AND g.[GlFinYear] = <finyear> AND (s.[ScName] LIKE '%Creditor%' OR s.[ScCode] = 'L') AND g.[GlAmount] > 0
+            ),
+            Payments AS (
+                SELECT g.[GlAccountId], g.[GlOsId] AS [BillNo], g.[GlDate] AS [PaymentDate], ABS(g.[GlOsAmt]) AS [PaidAmount]
+                FROM [dbo].[GLOS] g WHERE g.[CoSoftId] = <cosoftid> AND g.[GlOsType] = '2' AND g.[GlOsId] <> 'On  Account'
+            )
+            SELECT b.[PartyName], b.[BillNo] AS [Invoice No], FORMAT(b.[InvoiceDate], 'dd-MMM-yyyy') AS [Invoice Date], b.[BillAmount] AS [Bill Amount], FORMAT(p.[PaymentDate], 'dd-MMM-yyyy') AS [Payment Date], p.[PaidAmount] AS [Paid Amount], DATEDIFF(day, b.[InvoiceDate], p.[PaymentDate]) AS [Payment Days]
+            FROM BillCreation b JOIN Payments p ON p.[GlAccountId] = b.[GlAccountId] AND p.[BillNo] = b.[BillNo]
+            WHERE DATEDIFF(day, b.[InvoiceDate], p.[PaymentDate]) > <days>
+            ORDER BY [Payment Days] DESC, b.[InvoiceDate] ASC
     - Party Account: [GLOS].[GlAccountId] -> [dbo].[Account].[id] ([AcName]).
 
 - "stock" / inventory -> [dbo].[Stock]; transaction type master -> [dbo].[TranMaster]; item master -> [dbo].[Item] ([Name], [ItemCode], [CUnitId], [VUnitId], [Active]):
