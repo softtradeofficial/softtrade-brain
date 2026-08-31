@@ -137,11 +137,51 @@ async function introspect(): Promise<DatabaseSchema> {
   };
 }
 
+import * as fs from 'fs';
+import * as path from 'path';
+
+function findSchemaCachePath(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'schema_cache.json'),
+    path.resolve(process.cwd(), 'backend', 'schema_cache.json'),
+    path.resolve(__dirname, '..', 'schema_cache.json'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.resolve(process.cwd(), 'schema_cache.json');
+}
+
 export async function getSchema(forceRefresh = false): Promise<DatabaseSchema> {
   if (!forceRefresh && cache && cache.expiresAt > Date.now()) {
     return cache.value;
   }
+
+  const cacheFilePath = findSchemaCachePath();
+
+  if (!forceRefresh && fs.existsSync(cacheFilePath)) {
+    try {
+      const raw = fs.readFileSync(cacheFilePath, 'utf-8');
+      const parsed = JSON.parse(raw) as DatabaseSchema;
+      if (parsed && Array.isArray(parsed.tables)) {
+        parsed.tables = parsed.tables.filter((t) => !isExcludedTable(t.name));
+        cache = { value: parsed, expiresAt: Date.now() + config.schemaTtlMs };
+        console.log(`[schema] loaded ${parsed.tables.length} tables from local cache file: ${cacheFilePath}`);
+        return parsed;
+      }
+    } catch (err: any) {
+      console.warn(`[schema] could not parse schema_cache.json: ${err.message}`);
+    }
+  }
+
   const value = await introspect();
+  try {
+    fs.writeFileSync(cacheFilePath, JSON.stringify(value, null, 2), 'utf-8');
+    console.log(`[schema] saved schema to ${cacheFilePath}`);
+  } catch (err: any) {
+    console.warn(`[schema] could not save schema cache: ${err.message}`);
+  }
+
   cache = { value, expiresAt: Date.now() + config.schemaTtlMs };
   console.log(`[schema] loaded ${value.tables.length} tables/views, ${value.foreignKeys.length} foreign keys`);
   return value;

@@ -51,6 +51,22 @@ function formatType(row: Record<string, unknown>): string {
   return type;
 }
 
+import * as fs from 'fs';
+import * as path from 'path';
+
+function findSchemaCachePath(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'schema_cache.json'),
+    path.resolve(process.cwd(), 'backend', 'schema_cache.json'),
+    path.resolve(__dirname, '..', '..', '..', 'backend', 'schema_cache.json'),
+    path.resolve(__dirname, '..', 'schema_cache.json'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.resolve(process.cwd(), 'schema_cache.json');
+}
+
 export class SchemaManager {
   private cache: { value: DatabaseSchema; expiresAt: number } | null = null;
   private isExcluded: (tableName: string) => boolean;
@@ -64,6 +80,26 @@ export class SchemaManager {
       return this.cache.value;
     }
 
+    const cacheFilePath = findSchemaCachePath();
+
+    // 1. Try loading from local schema_cache.json if available and not forced
+    if (!forceRefresh && fs.existsSync(cacheFilePath)) {
+      try {
+        const raw = fs.readFileSync(cacheFilePath, 'utf-8');
+        const parsed = JSON.parse(raw) as DatabaseSchema;
+        if (parsed && Array.isArray(parsed.tables)) {
+          // Apply user exclusion filters to what remains in schema_cache.json
+          parsed.tables = parsed.tables.filter((t) => !this.isExcluded(t.name));
+          this.cache = { value: parsed, expiresAt: Date.now() + (this.config.schemaTtlMs ?? 600000) };
+          console.log(`[schema] Loaded ${parsed.tables.length} tables from local file: ${cacheFilePath}`);
+          return parsed;
+        }
+      } catch (err: any) {
+        console.warn(`[schema] Could not parse local schema cache: ${err.message}. Falling back to live DB introspection.`);
+      }
+    }
+
+    // 2. Live database introspection
     const pool = await this.db.getPool();
     const allowed = this.config.allowedSchemas || ['dbo'];
     const freshnessQuery = buildFreshnessQuery(this.config);
@@ -120,6 +156,14 @@ export class SchemaManager {
       notes,
       loadedAt: new Date().toISOString(),
     };
+
+    // Persist to local cache file
+    try {
+      fs.writeFileSync(cacheFilePath, JSON.stringify(value, null, 2), 'utf-8');
+      console.log(`[schema] Persisted updated schema cache to ${cacheFilePath}`);
+    } catch (saveErr: any) {
+      console.warn(`[schema] Could not persist schema cache: ${saveErr.message}`);
+    }
 
     this.cache = { value, expiresAt: Date.now() + (this.config.schemaTtlMs ?? 600000) };
     return value;
