@@ -23,7 +23,82 @@ export class LLMClient {
   private client: OpenAI;
 
   constructor(private readonly config: BrainConfig) {
-    this.client = new OpenAI({ apiKey: config.openai.apiKey });
+    this.client = new OpenAI({
+      apiKey: config.openai.apiKey,
+      baseURL: config.openai.baseURL || process.env.OPENAI_BASE_URL || undefined,
+    });
+  }
+
+  private async createChatCompletion(
+    params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming
+  ): Promise<OpenAI.Chat.ChatCompletion> {
+    try {
+      return await this.client.chat.completions.create(params);
+    } catch (err: any) {
+      if (err?.message && err.message.includes('temperature') && 'temperature' in params) {
+        const { temperature, ...rest } = params;
+        return await this.client.chat.completions.create(rest as any);
+      }
+      throw err;
+    }
+  }
+
+  public getFastModel(): string {
+    return this.config.openai.fastModel || process.env.FAST_MODEL || 'gemini-3.5-flash-lite';
+  }
+
+  public getStandardModel(): string {
+    return (
+      this.config.openai.standardModel ||
+      process.env.STANDARD_MODEL ||
+      this.config.openai.model ||
+      'gemini-3.6-flash'
+    );
+  }
+
+  public isComplexQuery(question: string, selectedTables: string[] = []): boolean {
+    const text = question.toLowerCase();
+    const complexKeywords = [
+      'trading account',
+      'trading statement',
+      'profit and loss',
+      'p&l',
+      'p and l',
+      'p/l',
+      'balance sheet',
+      'trial balance',
+      'gst',
+      'gstr',
+      'tax',
+      'tds',
+      'tcs',
+      'compare',
+      'comparison',
+      'versus',
+      'vs',
+      'quarter',
+      'quarterly',
+      'month-wise',
+      'monthly',
+      'year-wise',
+      'yearly',
+      'margin',
+      'growth',
+      'ratio',
+      'ledger',
+      'reconciliation',
+      'breakdown',
+    ];
+
+    if (complexKeywords.some((kw) => text.includes(kw))) {
+      return true;
+    }
+
+    if (selectedTables.length >= 3) {
+      return true;
+    }
+
+    return false;
   }
 
   public async selectTables(
@@ -35,9 +110,10 @@ export class LLMClient {
   ): Promise<string[]> {
     const glossary = buildBusinessGlossary(this.config);
     const userScope = buildUserScopePrompt(user);
+    const model = this.getFastModel();
 
-    const response = await this.client.chat.completions.create({
-      model: this.config.openai.model || 'gpt-4o',
+    const response = await this.createChatCompletion({
+      model,
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
@@ -86,10 +162,15 @@ export class LLMClient {
     history: ChatTurn[],
     schemaText: string,
     notes = '',
-    user?: UserContext
+    user?: UserContext,
+    selectedTables: string[] = [],
+    forceModel?: string
   ): Promise<Plan> {
     const glossary = buildBusinessGlossary(this.config);
     const userScope = buildUserScopePrompt(user);
+
+    const isComplex = this.isComplexQuery(question, selectedTables);
+    const modelToUse = forceModel || (isComplex ? this.getStandardModel() : this.getFastModel());
 
     const systemPrompt = [
       'You are a senior data analyst for the SoftTrade Brain ERP application.',
@@ -123,8 +204,8 @@ export class LLMClient {
       schemaText,
     ].join('\n');
 
-    const response = await this.client.chat.completions.create({
-      model: this.config.openai.model || 'gpt-4o',
+    const response = await this.createChatCompletion({
+      model: modelToUse,
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
@@ -147,6 +228,8 @@ export class LLMClient {
         action: 'query',
         sql: parsed['sql'],
         intent: typeof parsed['intent'] === 'string' ? parsed['intent'] : '',
+        modelUsed: modelToUse,
+        isComplex,
       };
     }
 
@@ -156,6 +239,8 @@ export class LLMClient {
         typeof parsed['message'] === 'string'
           ? parsed['message']
           : 'I could not work out how to answer that from this database. Could you rephrase it?',
+      modelUsed: modelToUse,
+      isComplex,
     };
   }
 
@@ -163,13 +248,15 @@ export class LLMClient {
     question: string,
     sql: string,
     result: QueryResult,
-    notes = ''
+    notes = '',
+    isComplex = false
   ): Promise<string> {
     const maxSummaryRows = this.config.maxRowsForSummary ?? 50;
     const sample = result.rows.slice(0, maxSummaryRows);
+    const modelToUse = isComplex ? this.getStandardModel() : this.getFastModel();
 
-    const response = await this.client.chat.completions.create({
-      model: this.config.openai.model || 'gpt-4o',
+    const response = await this.createChatCompletion({
+      model: modelToUse,
       temperature: 0.2,
       messages: [
         {
@@ -220,6 +307,7 @@ export class LLMClient {
     notes = '',
     user?: UserContext
   ): Promise<Plan> {
+    // Repair always escalates to Standard Flash for superior reasoning
     return this.planQuery(
       [
         'The previous attempt to answer this question failed.',
@@ -231,7 +319,10 @@ export class LLMClient {
       [],
       schemaText,
       notes,
-      user
+      user,
+      [],
+      this.getStandardModel()
     );
   }
 }
+

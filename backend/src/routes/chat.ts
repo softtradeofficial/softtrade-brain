@@ -18,6 +18,9 @@ const brain = new SoftTradeBrain({
   openai: {
     apiKey: config.openai.apiKey,
     model: config.openai.model,
+    fastModel: config.openai.fastModel,
+    standardModel: config.openai.standardModel,
+    baseURL: config.openai.baseURL,
   },
   maxRows: config.maxRows,
   maxRowsForSummary: config.maxRowsForSummary,

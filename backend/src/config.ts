@@ -37,7 +37,10 @@ export const config = {
 
   openai: {
     apiKey: required('OPENAI_API_KEY'),
-    model: process.env.OPENAI_MODEL ?? 'gpt-4o',
+    model: process.env.OPENAI_MODEL ?? 'gemini-3.6-flash',
+    fastModel: process.env.FAST_MODEL ?? 'gemini-3.5-flash-lite',
+    standardModel: process.env.STANDARD_MODEL ?? process.env.OPENAI_MODEL ?? 'gemini-3.6-flash',
+    baseURL: process.env.OPENAI_BASE_URL,
   },
 
   /** Hard cap on rows returned to the browser / fed back to the model. */

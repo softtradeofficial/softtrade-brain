@@ -149,6 +149,8 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
           elapsedMs: payload.elapsedMs ?? 0,
           failed: !!payload.error,
           showSql: false,
+          modelUsed: payload.modelUsed,
+          isComplex: payload.isComplex,
         });
         this.loading = false;
         this.shouldScroll = true;

@@ -20,6 +20,9 @@ export interface DatabaseConfig {
 export interface OpenAIConfig {
   apiKey: string;
   model?: string;
+  fastModel?: string;      // e.g. gemini-3.5-flash-lite
+  standardModel?: string;  // e.g. gemini-3.6-flash
+  baseURL?: string;
 }
 
 export interface BrainConfig {
@@ -73,6 +76,8 @@ export interface BrainResponse {
   truncated?: boolean;
   elapsedMs?: number;
   error?: string;
+  modelUsed?: string;
+  isComplex?: boolean;
 }
 
 export interface ColumnInfo {
@@ -112,5 +117,5 @@ export interface QueryResult {
 }
 
 export type Plan =
-  | { action: 'query'; sql: string; intent: string }
-  | { action: 'answer'; message: string };
+  | { action: 'query'; sql: string; intent: string; modelUsed?: string; isComplex?: boolean }
+  | { action: 'answer'; message: string; modelUsed?: string; isComplex?: boolean };

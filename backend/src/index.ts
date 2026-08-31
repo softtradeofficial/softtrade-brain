@@ -10,7 +10,14 @@ app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: '256kb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', model: config.openai.model, database: config.db.database });
+  res.json({
+    status: 'ok',
+    mode: 'hybrid-dynamic-router',
+    fastModel: config.openai.fastModel,
+    standardModel: config.openai.standardModel,
+    model: `Hybrid (${config.openai.fastModel} / ${config.openai.standardModel})`,
+    database: config.db.database,
+  });
 });
 
 app.use('/api', chatRouter);

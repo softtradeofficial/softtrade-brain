@@ -54,7 +54,7 @@ export class SoftTradeBrain {
     const selected = await this.llm.selectTables(trimmed, history, tableNames, user, maxTables);
     const schemaText = this.schemaMgr.renderSchemaForPrompt(schema, this.llm.toTableFilter(selected), user);
 
-    let plan = await this.llm.planQuery(trimmed, history, schemaText, schema.notes, user);
+    let plan = await this.llm.planQuery(trimmed, history, schemaText, schema.notes, user, selected);
 
     if (plan.action === 'answer') {
       return {
@@ -63,6 +63,8 @@ export class SoftTradeBrain {
         rows: [],
         columns: [],
         rowCount: 0,
+        modelUsed: plan.modelUsed,
+        isComplex: plan.isComplex,
       };
     }
 
@@ -127,7 +129,7 @@ export class SoftTradeBrain {
       result = await this.db.runQuery(guarded.sql, maxRows);
     }
 
-    const answer = await this.llm.explainResult(trimmed, guarded.sql, result, schema.notes);
+    const answer = await this.llm.explainResult(trimmed, guarded.sql, result, schema.notes, plan.isComplex);
 
     return {
       answer,
@@ -138,6 +140,8 @@ export class SoftTradeBrain {
       rowCount: result.rowCount,
       truncated: result.truncated,
       elapsedMs: result.elapsedMs,
+      modelUsed: plan.modelUsed,
+      isComplex: plan.isComplex,
     };
   }
 

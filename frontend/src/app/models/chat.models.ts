@@ -13,6 +13,8 @@ export interface QueryResultPayload {
   truncated?: boolean;
   elapsedMs?: number;
   error?: string;
+  modelUsed?: string;
+  isComplex?: boolean;
 }
 
 export interface ChatMessage {
@@ -29,6 +31,8 @@ export interface ChatMessage {
   truncated?: boolean;
   elapsedMs?: number;
   showSql?: boolean;
+  modelUsed?: string;
+  isComplex?: boolean;
 }
 
 export interface SchemaTable {

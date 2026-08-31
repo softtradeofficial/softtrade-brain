@@ -15,7 +15,7 @@
       </div>
       <div class="conn__row">
         <span class="conn__label">Model</span>
-        <span class="conn__value">{{ model || 'gpt-4o' }}</span>
+        <span class="conn__value">{{ model || 'Gemini Hybrid Router' }}</span>
       </div>
       <div class="conn__row">
         <span class="conn__label">Tables</span>
@@ -111,6 +111,14 @@
                 {{ message.showSql ? 'Hide SQL' : 'View SQL' }}
               </button>
               <span class="sql__intent" *ngIf="message.intent">{{ message.intent }}</span>
+              <span
+                class="sql__model"
+                [class.sql__model--complex]="message.isComplex"
+                *ngIf="message.modelUsed"
+                title="Model used to plan this query"
+              >
+                {{ message.isComplex ? '🚀 ' + message.modelUsed : '⚡ ' + message.modelUsed }}
+              </span>
               <button type="button" class="sql__copy" *ngIf="message.showSql" (click)="copySql(message)">
                 Copy
               </button>
