@@ -1,16 +1,33 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { BehaviorSubject, Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { ChatTurn, QueryResultPayload, SchemaPayload } from '../models/chat.models';
-
+export interface SoftTradeERPContext {
+  ClientRegId: number;
+  CoSoftId: number;
+  UserId: number;
+  DivId: number;
+  CoFinyear: number;
+  CommonSalesOrder: boolean;
+  UserName: string;
+  RoleId: number;
+  UserRole: string;
+  RegNo: number;
+  AppSoftCode: string;
+  AppSoftType: string;
+}
 @Injectable({ providedIn: 'root' })
 export class ChatService {
+  private erpDataSubject = new BehaviorSubject<SoftTradeERPContext | null>(null);
   private baseUrl = environment.apiBaseUrl;
   private authToken = '';
   private customHeaders: Record<string, string> = {};
-
-  constructor(private http: HttpClient) {}
+  erpData$ = this.erpDataSubject.asObservable();
+  constructor(private http: HttpClient) {
+    window.addEventListener('message',this.receiveMessage.bind(this)
+    );
+  }
 
   public configure(options: { apiUrl?: string; authToken?: string; customHeaders?: Record<string, string> }): void {
     if (options.apiUrl) this.baseUrl = options.apiUrl.replace(/\/+$/, '');
@@ -43,6 +60,27 @@ export class ChatService {
       `${this.baseUrl}/health`,
       { headers: this.getHeaders() }
     );
+  }
+
+
+   public receiveMessage(event: MessageEvent): void {
+    console.log('Message received from ERP:', event);
+    if (event.origin !== 'http://localhost:4200') {
+      return;
+    }
+    const message = event.data;
+    if (!message ||message.type !== 'SOFTTRADE_ERP_CONTEXT'
+    ) {
+      return;
+    }
+    console.log('ERP DATA:',message.data);
+    this.erpDataSubject.next(message.data);
+  }
+
+
+  getERPData():
+    SoftTradeERPContext | null {
+    return this.erpDataSubject.value;
   }
 }
 

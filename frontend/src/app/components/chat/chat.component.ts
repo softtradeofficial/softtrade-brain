@@ -1,5 +1,5 @@
 import { AfterViewChecked, Component, ElementRef, Input, OnChanges, OnInit, SimpleChanges, ViewChild } from '@angular/core';
-import { ChatService } from '../../services/chat.service';
+import { ChatService, SoftTradeERPContext } from '../../services/chat.service';
 import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
 
 @Component({
@@ -26,7 +26,7 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
   draft = '';
   loading = false;
   connectionError = '';
-
+  erpData:SoftTradeERPContext | undefined;
   database = '';
   model = '';
   tables: SchemaTable[] = [];
@@ -39,6 +39,13 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
   constructor(private chat: ChatService) {}
 
   ngOnInit(): void {
+    this.chat.erpData$.subscribe(data => {
+        if (!data) {
+          return;
+        }
+        this.erpData = data;
+        console.log("this.erpData Recived",this.erpData);
+      });
     this.chat.configure({
       apiUrl: this.apiUrl,
       authToken: this.authToken,
