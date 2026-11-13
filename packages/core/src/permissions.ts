@@ -1,5 +1,5 @@
 import type * as sql from 'mssql';
-import type { TableInfo, UserContext } from './types';
+import type { ERPContextPayload, TableInfo, UserContext } from './types';
 
 export const MODULE_TABLE_MAP: Record<string, string[]> = {
   SALES: ['invtrantbl', 'sihdr', 'sidtl', 'ordhdr', 'orddtl', 'sigsttaxsummary'],
@@ -18,7 +18,41 @@ const SENSITIVE_COLUMNS = new Set([
   'lockpwd',
 ]);
 
-export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId: number): Promise<UserContext> {
+export async function resolveUserContextFromDb(
+  pool: sql.ConnectionPool,
+  userId: number,
+  erpContext?: ERPContextPayload
+): Promise<UserContext> {
+  const sessionOverrides: Partial<UserContext> = {
+    clientRegId: erpContext?.ClientRegId,
+    regNo: erpContext?.RegNo,
+    coSoftId: erpContext?.CoSoftId && erpContext.CoSoftId > 0 ? erpContext.CoSoftId : undefined,
+    divId: erpContext?.DivId && erpContext.DivId > 0 ? erpContext.DivId : undefined,
+    coFinyear: erpContext?.CoFinyear && erpContext.CoFinyear > 0 ? erpContext.CoFinyear : undefined,
+    commonSalesOrder: erpContext?.CommonSalesOrder,
+    appSoftCode: erpContext?.AppSoftCode,
+    appSoftType: erpContext?.AppSoftType,
+  };
+
+  // Superadmin in SoftTrade ERP has UserId = -1 (or RoleId = -1 / 'admin') and no record in dbo.usermast
+  if (
+    userId === -1 ||
+    erpContext?.RoleId === -1 ||
+    (erpContext?.UserRole && erpContext.UserRole.toLowerCase().includes('admin')) ||
+    (erpContext?.UserName && erpContext.UserName.toLowerCase() === 'admin')
+  ) {
+    return {
+      userId: userId || -1,
+      userCode: erpContext?.UserName || 'ADMIN',
+      userName: erpContext?.UserName || 'Super Admin',
+      isSuperUser: true,
+      roleId: erpContext?.RoleId ?? -1,
+      roleName: erpContext?.UserRole || 'SUPER ADMIN',
+      allowedModules: Object.keys(MODULE_TABLE_MAP),
+      ...sessionOverrides,
+    };
+  }
+
   // Built-in simulated store keeper profile for demo / testing
   if (userId === 999) {
     return {
@@ -30,6 +64,7 @@ export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId:
       roleName: 'STORE KEEPER',
       allowedModules: ['STOCK', 'AREA', 'COMPANY'],
       restrictedTables: ['invtrantbl', 'sihdr', 'sidtl', 'ordhdr', 'orddtl', 'sigsttaxsummary', 'vheader', 'vntype', 'accurbal', 'acbal'],
+      ...sessionOverrides,
     };
   }
 
@@ -51,6 +86,18 @@ export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId:
 
   const user = userRes.recordset[0];
   if (!user) {
+    if (erpContext) {
+      return {
+        userId,
+        userCode: erpContext.UserName || String(userId),
+        userName: erpContext.UserName || 'User',
+        isSuperUser: !erpContext.RoleId || erpContext.RoleId <= 0,
+        roleId: erpContext.RoleId,
+        roleName: erpContext.UserRole || 'User',
+        allowedModules: Object.keys(MODULE_TABLE_MAP),
+        ...sessionOverrides,
+      };
+    }
     throw new Error('User with id ' + userId + ' was not found in [dbo].[usermast].');
   }
 
@@ -63,11 +110,18 @@ export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId:
     return {
       userId: user.id,
       userCode: user.userCode,
-      userName: user.userName,
+      userName: erpContext?.UserName || user.userName,
       isSuperUser: true,
       roleId: user.RoleId,
-      roleName: user.RoleName || 'SuperUser',
-      coSoftId: user.CoSoftId,
+      roleName: erpContext?.UserRole || user.RoleName || 'SuperUser',
+      coSoftId: sessionOverrides.coSoftId ?? user.CoSoftId,
+      divId: sessionOverrides.divId,
+      coFinyear: sessionOverrides.coFinyear,
+      commonSalesOrder: sessionOverrides.commonSalesOrder,
+      clientRegId: sessionOverrides.clientRegId,
+      regNo: sessionOverrides.regNo,
+      appSoftCode: sessionOverrides.appSoftCode,
+      appSoftType: sessionOverrides.appSoftType,
       allowedDivisions: divisions,
       allowedItemGroups: itemGroups,
       allowedPartyTypes: partyTypes,
@@ -113,11 +167,18 @@ export async function resolveUserContextFromDb(pool: sql.ConnectionPool, userId:
   return {
     userId: user.id,
     userCode: user.userCode,
-    userName: user.userName,
+    userName: erpContext?.UserName || user.userName,
     isSuperUser: false,
     roleId: user.RoleId,
-    roleName: user.RoleName,
-    coSoftId: user.CoSoftId,
+    roleName: erpContext?.UserRole || user.RoleName,
+    coSoftId: sessionOverrides.coSoftId ?? user.CoSoftId,
+    divId: sessionOverrides.divId,
+    coFinyear: sessionOverrides.coFinyear,
+    commonSalesOrder: sessionOverrides.commonSalesOrder,
+    clientRegId: sessionOverrides.clientRegId,
+    regNo: sessionOverrides.regNo,
+    appSoftCode: sessionOverrides.appSoftCode,
+    appSoftType: sessionOverrides.appSoftType,
     allowedDivisions: user.AllDivision ? undefined : divisions,
     allowedItemGroups: itemGroups.length ? itemGroups : undefined,
     allowedPartyTypes: partyTypes.length ? partyTypes : undefined,
@@ -159,7 +220,29 @@ function maskSensitiveColumns(table: TableInfo): TableInfo {
 }
 
 export function buildUserScopePrompt(user?: UserContext): string {
-  if (!user || user.isSuperUser) return '';
+  if (!user) return '';
+
+  const sessionLines: string[] = [];
+  if (user.coSoftId && user.coSoftId > 0) {
+    sessionLines.push(
+      `- Active ERP Session Company: [CoSoftId] = ${user.coSoftId}` +
+        (user.commonSalesOrder !== undefined ? ` (CommonSalesOrder = ${user.commonSalesOrder ? 1 : 0})` : '') +
+        `. Default to filtering by [CoSoftId] = ${user.coSoftId} on transaction tables (and include -1/0 on master/order tables as appropriate) unless the user asks about all companies or another specific company.`
+    );
+  }
+  if (user.coFinyear && user.coFinyear > 0) {
+    sessionLines.push(
+      `- Active ERP Session Financial Year: [CoFinyear] = ${user.coFinyear} (FY ${user.coFinyear}-${String(user.coFinyear + 1).slice(-2)}). When filtering by financial year without a different year specified by the user, use [CoFinyear] = ${user.coFinyear}.`
+    );
+  }
+  if (user.divId && user.divId > 0) {
+    sessionLines.push(`- Active ERP Session Division: [DivId] = ${user.divId}.`);
+  }
+
+  if (user.isSuperUser) {
+    if (!sessionLines.length) return '';
+    return ['ACTIVE ERP SESSION CONTEXT:', ...sessionLines].join('\n');
+  }
 
   const allModules = Object.keys(MODULE_TABLE_MAP);
   const userModules = new Set((user.allowedModules || []).map((m) => m.toUpperCase()));
@@ -169,6 +252,7 @@ export function buildUserScopePrompt(user?: UserContext): string {
     'USER SECURITY & PERMISSION CONSTRAINTS (MANDATORY):',
     '- Current User: "' + (user.userName || user.userCode || 'User') + '" (Role: ' + (user.roleName || 'Restricted') + ')',
     '- Permitted Modules: [' + Array.from(userModules).join(', ') + ']',
+    ...sessionLines,
   ];
 
   if (forbiddenModules.length > 0) {

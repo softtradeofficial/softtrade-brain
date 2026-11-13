@@ -1,6 +1,6 @@
 import type { DatabaseClient } from './db';
 import type { BrainConfig, DatabaseSchema, ForeignKeyInfo, TableInfo, UserContext } from './types';
-import { createTableFilter, buildFreshnessQuery, freshnessNote } from './domain';
+import { createTableFilter, buildFreshnessQuery, freshnessNote, buildCompaniesQuery, companiesNote } from './domain';
 import { filterTablesForUser } from './permissions';
 
 const COLUMNS_SQL = `
@@ -75,6 +75,24 @@ export class SchemaManager {
     this.isExcluded = createTableFilter(config);
   }
 
+  private async fetchLiveNotes(): Promise<string> {
+    try {
+      const pool = await this.db.getPool();
+      const freshnessQuery = buildFreshnessQuery(this.config);
+      const companiesQuery = buildCompaniesQuery();
+      const [freshness, companies] = await Promise.all([
+        pool.request().query(freshnessQuery).catch(() => null),
+        pool.request().query(companiesQuery).catch(() => null),
+      ]);
+      const freshRow = freshness?.recordset?.[0] as Record<string, unknown> | undefined;
+      const fNote = freshRow ? freshnessNote(freshRow['lastBill'], freshRow['bills']) : '';
+      const cNote = companiesNote(companies?.recordset as Array<Record<string, unknown>> | undefined);
+      return [cNote, fNote].filter(Boolean).join('\n\n');
+    } catch {
+      return '';
+    }
+  }
+
   public async getSchema(forceRefresh = false): Promise<DatabaseSchema> {
     if (!forceRefresh && this.cache && this.cache.expiresAt > Date.now()) {
       return this.cache.value;
@@ -82,17 +100,24 @@ export class SchemaManager {
 
     const cacheFilePath = findSchemaCachePath();
 
-    // 1. Try loading from local schema_cache.json if available and not forced
+    // 1. Try loading table structure from local schema_cache.json if available and not forced,
+    //    while still binding the actual client database name and live company/freshness notes.
     if (!forceRefresh && fs.existsSync(cacheFilePath)) {
       try {
         const raw = fs.readFileSync(cacheFilePath, 'utf-8');
         const parsed = JSON.parse(raw) as DatabaseSchema;
         if (parsed && Array.isArray(parsed.tables)) {
-          // Apply user exclusion filters to what remains in schema_cache.json
-          parsed.tables = parsed.tables.filter((t) => !this.isExcluded(t.name));
-          this.cache = { value: parsed, expiresAt: Date.now() + (this.config.schemaTtlMs ?? 600000) };
-          console.log(`[schema] Loaded ${parsed.tables.length} tables from local file: ${cacheFilePath}`);
-          return parsed;
+          const liveNotes = await this.fetchLiveNotes();
+          const clientSchema: DatabaseSchema = {
+            ...parsed,
+            database: this.config.db.database,
+            tables: parsed.tables.filter((t) => !this.isExcluded(t.name)),
+            notes: liveNotes || parsed.notes || '',
+            loadedAt: new Date().toISOString(),
+          };
+          this.cache = { value: clientSchema, expiresAt: Date.now() + (this.config.schemaTtlMs ?? 600000) };
+          console.log(`[schema] Loaded ${clientSchema.tables.length} tables for DB "${clientSchema.database}" (cached template + live notes)`);
+          return clientSchema;
         }
       } catch (err: any) {
         console.warn(`[schema] Could not parse local schema cache: ${err.message}. Falling back to live DB introspection.`);
@@ -102,16 +127,12 @@ export class SchemaManager {
     // 2. Live database introspection
     const pool = await this.db.getPool();
     const allowed = this.config.allowedSchemas || ['dbo'];
-    const freshnessQuery = buildFreshnessQuery(this.config);
 
-    const [columnsResult, fkResult, freshness] = await Promise.all([
+    const [columnsResult, fkResult, notes] = await Promise.all([
       pool.request().query(COLUMNS_SQL),
       pool.request().query(FOREIGN_KEYS_SQL),
-      pool.request().query(freshnessQuery).catch(() => null),
+      this.fetchLiveNotes(),
     ]);
-
-    const freshRow = freshness?.recordset?.[0] as Record<string, unknown> | undefined;
-    const notes = freshRow ? freshnessNote(freshRow['lastBill'], freshRow['bills']) : '';
 
     const byTable = new Map<string, TableInfo>();
 

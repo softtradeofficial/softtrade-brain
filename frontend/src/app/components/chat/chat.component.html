@@ -1,5 +1,5 @@
 <div class="shell">
-  <aside class="sidebar" [class.sidebar--open]="showSchema">
+  <!-- <aside class="sidebar" [class.sidebar--open]="showSchema">
     <div class="brand">
       <div class="brand__mark">ST</div>
       <div>
@@ -47,14 +47,19 @@
         </p>
       </div>
     </div>
-  </aside>
+  </aside> -->
 
   <main class="main">
     <header class="topbar">
       <button type="button" class="icon-btn topbar__toggle" (click)="showSchema = !showSchema">
         Schema
       </button>
-      <h1>Chat with your data</h1>
+      <div class="topbar__title-group">
+        <h1>Chat with your data</h1>
+        <span class="topbar__db-badge" *ngIf="database">
+          {{ clientName ? clientName + ' (' + database + ')' : database }}
+        </span>
+      </div>
       <button type="button" class="icon-btn" (click)="clear()" [disabled]="!messages.length">
         New chat
       </button>

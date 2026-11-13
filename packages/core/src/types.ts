@@ -39,6 +39,21 @@ export interface BrainConfig {
   customGlossary?: string;
 }
 
+export interface ERPContextPayload {
+  ClientRegId?: number;
+  CoSoftId?: number;
+  UserId?: number;
+  DivId?: number;
+  CoFinyear?: number;
+  CommonSalesOrder?: boolean;
+  UserName?: string;
+  RoleId?: number;
+  UserRole?: string;
+  RegNo?: number;
+  AppSoftCode?: string;
+  AppSoftType?: string;
+}
+
 export interface UserContext {
   userId: number;
   userCode: string;
@@ -46,7 +61,14 @@ export interface UserContext {
   isSuperUser?: boolean;
   roleId?: number;
   roleName?: string;
+  clientRegId?: number;
+  regNo?: number;
   coSoftId?: number;
+  divId?: number;
+  coFinyear?: number;
+  commonSalesOrder?: boolean;
+  appSoftCode?: string;
+  appSoftType?: string;
   allowedDivisions?: number[];
   allowedItemGroups?: number[];
   allowedPartyTypes?: string[];

@@ -15,6 +15,8 @@ export interface QueryResultPayload {
   error?: string;
   modelUsed?: string;
   isComplex?: boolean;
+  database?: string;
+  clientName?: string;
 }
 
 export interface ChatMessage {
@@ -43,6 +45,8 @@ export interface SchemaTable {
 
 export interface SchemaPayload {
   database: string;
+  clientName?: string;
+  clientRegId?: number;
   loadedAt: string;
   tables: SchemaTable[];
 }

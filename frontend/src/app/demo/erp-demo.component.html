@@ -6,9 +6,14 @@
       <span class="erp-title">SoftTrade ERP <span>Enterprise Suite</span></span>
     </div>
 
-    <!-- Active User & Role Switcher Simulator -->
+    <!-- Active Client & User Role Switcher Simulator -->
     <div class="erp-user-switcher">
-      <label for="userSelect">Simulate Logged-In User:</label>
+      <label for="clientSelect">Client (CSInfo):</label>
+      <select id="clientSelect" [(ngModel)]="selectedClientRegId" (change)="onClientChange()">
+        <option *ngFor="let c of clients" [value]="c.regId">{{ c.label }}</option>
+      </select>
+
+      <label for="userSelect">User:</label>
       <select id="userSelect" [(ngModel)]="selectedUserId" (change)="onUserChange()">
         <option [value]="0">👑 Super Administrator (Full Unrestricted Access)</option>
         <option [value]="61">👤 AMITK - Office Executive (Divisions 45, 52, 53)</option>

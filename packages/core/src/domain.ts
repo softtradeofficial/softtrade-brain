@@ -109,32 +109,23 @@ export function buildBusinessGlossary(config: BrainConfig): string {
     '  Orders are NOT bills. Never answer a question about bills or invoices using ORDHDR.',
     '',
     '- "company" / MULTI-COMPANY FILTERING & SELECTION (MANDATORY):',
-    '  SoftTrade ERP stores data for multiple companies in the same database. Every table containing [CoSoftId] belongs to a specific company in [dbo].[company].',
-    '  The active companies in [dbo].[company] are:',
-    '    1. "SHREE TADKESHWAR AGRO FOOD PRODUCT" (CoSoftId = 982903242, COCode = 116)',
-    '    2. "SHREE TADKESHWAR INDUSTRIES PVT LTD-15-11-2026" (CoSoftId = 17593440, COCode = 114)',
-    '    3. "KEDAWAT REFOILS-15-11-2026" (CoSoftId = 38604957, COCode = 108)',
-    '    4. "AMIT GUPTA-15-11-2026" (CoSoftId = 705853702, COCode = 98)',
+    '  SoftTrade ERP stores data for one or more companies in the same database. Every table containing [CoSoftId] belongs to a specific company in [dbo].[company] ([CoSoftId], [COCode], [COname]).',
     '  ',
     '  MANDATORY COMPANY WORKFLOW:',
-    '  - If the user asks for transactional or operational data (bills, sales, purchases, stock, party ledger balances, expenses, etc.) AND no specific company has been mentioned in the question or recent chat turns or user scope:',
-    '    DO NOT guess or run across all companies. You MUST reply with action "answer" asking:',
-    '    "Which company do you want to generate the data for?',
-    '    1. SHREE TADKESHWAR AGRO FOOD PRODUCT',
-    '    2. SHREE TADKESHWAR INDUSTRIES PVT LTD-15-11-2026',
-    '    3. KEDAWAT REFOILS-15-11-2026',
-    '    4. AMIT GUPTA-15-11-2026',
-    '    (Or let me know if you would like a combined total across all companies.)"',
+    '  - If an Active ERP Session Company ([CoSoftId]) is specified in USER SECURITY & PERMISSION CONSTRAINTS / ACTIVE ERP SESSION CONTEXT below, ALWAYS use that [CoSoftId] automatically unless the user explicitly asks about another company or all companies.',
+    '  - Otherwise, if the database has only 1 active company in ACTIVE COMPANIES IN THIS DATABASE below, use that company automatically.',
+    '  - If the database has multiple active companies AND no active session company is set AND no specific company has been mentioned in the question or recent chat turns:',
+    '    DO NOT guess. Reply with action "answer" asking the user which company from ACTIVE COMPANIES IN THIS DATABASE they want to query (or if they want a combined total across all companies).',
     '  - Once a company is chosen or specified:',
     '    - For transaction documents (Sales Invoices [InvTranTbl], [Stock], [SIDtl], [SIHDR], Vouchers [Vheader]):',
     '        filter: AND [dbo].[InvTranTbl].[CoSoftId] = <exact_cosoftid>',
     '    - For Sales Orders ([ORDHDR], [OrdDtl]) and Master tables ([Item], [Account], [Party], [MastById], [BookMast]):',
-    '        - If the company has CommonSalesOrder = 1 (Tadkeshwar Agro [982903242] / Tadkeshwar Industries [17593440]):',
+    '        - If the company has CommonSalesOrder = 1:',
     '            filter: AND [dbo].[ORDHDR].[CoSoftId] IN (<exact_cosoftid>, -1)',
     '            (because common sales orders and master data are stored with CoSoftId = -1).',
-    '        - If the company has separate master data (Kedawat Refoils [38604957] / Amit Gupta [705853702]):',
+    '        - If the company has separate master data (CommonSalesOrder = 0 / false):',
     '            filter: AND [dbo].[ORDHDR].[CoSoftId] = <exact_cosoftid>',
-    '  - Exception: Questions that explicitly compare companies or query companies themselves (e.g. "List all companies", "Which company has the most sales?") do NOT ask first; they query across [dbo].[company].',
+    '  - Exception: Questions that explicitly compare companies or query companies themselves (e.g. "List all companies", "How many companies are there?", "Which company has the most sales?") do NOT ask first; they query across [dbo].[company].',
     '',
     '- "party" / "customer" / "supplier" / "account details":',
     '    - Party Name & Station -> [dbo].[Account] ([AcName], [AcStation], [AcDeActivate], [AcOS], key [id]):',
@@ -573,6 +564,18 @@ export function buildBusinessGlossary(config: BrainConfig): string {
 export function buildFreshnessQuery(config: BrainConfig): string {
   const salesSeries = config.salesInvoiceSeries || 'SIN';
   return "SELECT MAX([EIDocDate]) AS [lastBill], COUNT(*) AS [bills] FROM [dbo].[InvTranTbl] WHERE [InvSR] = '" + salesSeries + "' AND ISNULL([RecStatus], 0) NOT IN (-1, 2)";
+}
+
+export function buildCompaniesQuery(): string {
+  return 'SELECT [CoSoftId], [COCode], [COname] FROM [dbo].[company] ORDER BY [COCode] ASC, [id] ASC';
+}
+
+export function companiesNote(rows: Array<Record<string, unknown>> | undefined): string {
+  if (!rows || !rows.length) return '';
+  const list = rows
+    .map((r, idx) => `  ${idx + 1}. "${String(r['COname'] ?? '').trim()}" (CoSoftId = ${r['CoSoftId']}, COCode = ${r['COCode']})`)
+    .join('\n');
+  return ['ACTIVE COMPANIES IN THIS DATABASE ([dbo].[company]):', list].join('\n');
 }
 
 export function freshnessNote(lastBill: unknown, bills: unknown): string {

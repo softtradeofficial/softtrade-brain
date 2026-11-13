@@ -9,6 +9,7 @@ import type {
   BrainResponse,
   ChatTurn,
   DatabaseSchema,
+  ERPContextPayload,
   QueryResult,
   TableInfo,
   UserContext,
@@ -29,9 +30,9 @@ export class SoftTradeBrain {
     return this.schemaMgr.getSchema(forceRefresh);
   }
 
-  public async resolveUser(userId: number): Promise<UserContext> {
+  public async resolveUser(userId: number, erpContext?: ERPContextPayload): Promise<UserContext> {
     const pool = await this.db.getPool();
-    return resolveUserContextFromDb(pool, userId);
+    return resolveUserContextFromDb(pool, userId, erpContext);
   }
 
   public async ask(

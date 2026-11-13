@@ -2,33 +2,28 @@ import express from 'express';
 import cors from 'cors';
 import { config } from './config';
 import { chatRouter } from './routes/chat';
-import { getSchema } from './schema';
+import { getCsinfoPool } from './csinfo';
 
 const app = express();
 
-app.use(cors({ origin: config.corsOrigin }));
+app.use(
+  cors({
+    origin: config.corsOrigin === '*' ? true : config.corsOrigin.split(',').map((o) => o.trim()),
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '256kb' }));
-
-app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    mode: 'hybrid-dynamic-router',
-    fastModel: config.openai.fastModel,
-    standardModel: config.openai.standardModel,
-    model: `Hybrid (${config.openai.fastModel} / ${config.openai.standardModel})`,
-    database: config.db.database,
-  });
-});
 
 app.use('/api', chatRouter);
 
 app.listen(config.port, () => {
   console.log(`[server] listening on http://localhost:${config.port}`);
   console.log(`[server] CORS origin: ${config.corsOrigin}`);
+  console.log(`[server] CSInfo server: ${config.csinfo.server}/${config.csinfo.database}`);
 
-  // Warm the schema cache so the first question is not slowed down by introspection.
-  getSchema().catch((error) => {
-    console.error('[server] could not load the database schema at startup:', error.message);
-    console.error('[server] check your DB_* settings in backend/.env');
+  // Warm the CSInfo connection pool at startup so the first client lookup is instant.
+  getCsinfoPool().catch((error) => {
+    console.error('[server] could not connect to CSInfo database at startup:', error.message);
+    console.error('[server] check your CSINFO_DB_* settings in backend/.env');
   });
 });

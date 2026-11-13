@@ -18,21 +18,41 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function positivePort(name: string, fallback: number): number {
+  const parsed = num(name, fallback);
+  return parsed > 0 ? parsed : fallback;
+}
+
 export const config = {
   port: num('PORT', 3000),
-  corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:4200',
+  corsOrigin: process.env.CORS_ORIGIN ?? '*',
 
+  /** Central CSInfo database used to resolve each client's DB & Server IP by ClientRegId */
+  csinfo: {
+    server: process.env.CSINFO_DB_SERVER ?? '165.99.53.25',
+    database: process.env.CSINFO_DB_DATABASE ?? 'CSinfo',
+    user: process.env.CSINFO_DB_USER ?? 'SoftTradeUser',
+    password: process.env.CSINFO_DB_PASSWORD ?? 'SoftTrade$2336225',
+    port: positivePort('CSINFO_DB_PORT', 1433),
+    instanceName: process.env.CSINFO_DB_INSTANCE || undefined,
+    encrypt: process.env.CSINFO_DB_ENCRYPT === 'true',
+    trustServerCertificate: process.env.CSINFO_DB_TRUST_SERVER_CERTIFICATE !== 'false',
+    fallbackServer: process.env.CSINFO_FALLBACK_SERVER || '162.4.140.2',
+    fallbackUser: process.env.CSINFO_FALLBACK_USER || 'SoftTradeWebUser',
+    fallbackPassword: process.env.CSINFO_FALLBACK_PASSWORD || process.env.CSINFO_DB_PASSWORD || 'SoftTrade$2336225',
+  },
+
+  /** Optional default/fallback database when no ClientRegId is provided */
   db: {
-    server: required('DB_SERVER'),
-    database: required('DB_DATABASE'),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    port: num('DB_PORT', 1433),
+    server: process.env.DB_SERVER || '',
+    database: process.env.DB_DATABASE || '',
+    user: process.env.DB_USER || 'SoftTradeWebUser',
+    password: process.env.DB_PASSWORD || 'SoftTrade$2336225',
+    port: positivePort('DB_PORT', 1433),
     instanceName: process.env.DB_INSTANCE || undefined,
-    encrypt: process.env.DB_ENCRYPT !== 'false',
+    encrypt: process.env.DB_ENCRYPT === 'true',
     trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
-    // Windows integrated auth is used when no user/password is supplied.
-    trustedConnection: !process.env.DB_USER,
+    trustedConnection: !process.env.DB_USER && !!process.env.DB_SERVER,
   },
 
   openai: {

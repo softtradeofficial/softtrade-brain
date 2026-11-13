@@ -7,10 +7,17 @@ export class DatabaseClient {
   constructor(private readonly config: DatabaseConfig, private readonly queryTimeoutMs: number = 30000) {}
 
   private buildConfig(): sql.config {
+    const resolvedPort =
+      this.config.instanceName
+        ? undefined
+        : this.config.port && this.config.port > 0
+        ? this.config.port
+        : 1433;
+
     const base: sql.config = {
       server: this.config.server,
       database: this.config.database,
-      port: this.config.instanceName ? undefined : (this.config.port ?? 1433),
+      port: resolvedPort,
       requestTimeout: this.queryTimeoutMs,
       connectionTimeout: 15000,
       pool: {
@@ -19,7 +26,7 @@ export class DatabaseClient {
         idleTimeoutMillis: this.config.pool?.idleTimeoutMillis ?? 30000,
       },
       options: {
-        encrypt: this.config.encrypt ?? true,
+        encrypt: this.config.encrypt ?? false,
         trustServerCertificate: this.config.trustServerCertificate ?? true,
         instanceName: this.config.instanceName,
         readOnlyIntent: true,

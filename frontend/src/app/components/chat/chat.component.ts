@@ -1,4 +1,5 @@
-import { AfterViewChecked, Component, ElementRef, Input, OnChanges, OnInit, SimpleChanges, ViewChild } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, Input, OnChanges, OnDestroy, OnInit, SimpleChanges, ViewChild } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { ChatService, SoftTradeERPContext } from '../../services/chat.service';
 import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
 
@@ -7,7 +8,7 @@ import { ChatMessage, ChatTurn, SchemaTable } from '../../models/chat.models';
   templateUrl: './chat.component.html',
   styleUrls: ['./chat.component.css'],
 })
-export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
+export class ChatComponent implements OnInit, OnChanges, AfterViewChecked, OnDestroy {
   @ViewChild('scrollPane') private scrollPane?: ElementRef<HTMLElement>;
 
   @Input() apiUrl?: string;
@@ -26,8 +27,9 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
   draft = '';
   loading = false;
   connectionError = '';
-  erpData:SoftTradeERPContext | undefined;
+  erpData: SoftTradeERPContext | undefined;
   database = '';
+  clientName = '';
   model = '';
   tables: SchemaTable[] = [];
   showSchema = false;
@@ -35,35 +37,55 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
 
   private nextId = 1;
   private shouldScroll = false;
+  private erpSub?: Subscription;
 
   constructor(private chat: ChatService) {}
 
   ngOnInit(): void {
-    this.chat.erpData$.subscribe(data => {
-        if (!data) {
-          return;
-        }
-        this.erpData = data;
-        console.log("this.erpData Recived",this.erpData);
-      });
     this.chat.configure({
       apiUrl: this.apiUrl,
       authToken: this.authToken,
       customHeaders: this.customHeaders || {},
     });
 
-    this.chat.health().subscribe({
-      next: (info) => {
-        this.database = info.database;
-        this.model = info.model;
-      },
-      error: () => {
-        this.connectionError =
-          'Cannot reach the API. Check connection or start the backend service.';
-      },
+    this.erpSub = this.chat.erpData$.subscribe((data) => {
+      if (!data) {
+        return;
+      }
+      const prevClient = this.erpData?.ClientRegId;
+      this.erpData = data;
+      this.connectionError = '';
+      if (prevClient !== undefined && prevClient !== data.ClientRegId) {
+        this.clear();
+      }
+      this.loadHealth();
+      this.reloadSchema();
     });
 
-    this.reloadSchema();
+    // If ERP context was not already set synchronously via URL params, run initial check
+    if (!this.erpData) {
+      this.loadHealth();
+      this.reloadSchema();
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.erpSub?.unsubscribe();
+  }
+
+  public loadHealth(): void {
+    this.chat.health().subscribe({
+      next: (info) => {
+        this.connectionError = '';
+        this.database = info.database || this.database;
+        this.clientName = info.clientName || this.clientName;
+        this.model = info.model || this.model;
+      },
+      error: (err) => {
+        this.connectionError =
+          err?.error?.error || 'Cannot reach the API. Check connection or start the backend service.';
+      },
+    });
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -75,6 +97,7 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
       });
       if (!changes['customHeaders']?.firstChange) {
         this.clear();
+        this.loadHealth();
         this.reloadSchema();
       }
     }
@@ -84,7 +107,8 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
     this.chat.schema().subscribe({
       next: (payload) => {
         this.tables = payload.tables;
-        this.database = payload.database;
+        this.database = payload.database || this.database;
+        this.clientName = payload.clientName || this.clientName;
       },
       error: () => {
         /* The health check already reports connection problems. */
@@ -144,6 +168,12 @@ export class ChatComponent implements OnInit, OnChanges, AfterViewChecked {
 
     this.chat.ask(question, history).subscribe({
       next: (payload) => {
+        if (payload.database) {
+          this.database = payload.database;
+        }
+        if (payload.clientName) {
+          this.clientName = payload.clientName;
+        }
         Object.assign(placeholder, {
           pending: false,
           text: payload.answer,
